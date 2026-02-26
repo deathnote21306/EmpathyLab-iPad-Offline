@@ -4,7 +4,7 @@ import PackageDescription
 let package = Package(
     name: "EmpathyLab",
     platforms: [
-        .iOS("17.0")
+        .iOS(.v17)
     ],
     products: [
         .executable(
