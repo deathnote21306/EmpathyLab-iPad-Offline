@@ -16,7 +16,10 @@ struct LessonFlowView: View {
                     let isWide = proxy.size.width > 1000
                     if isWide {
                         HStack(alignment: .top, spacing: 16) {
-                            leftColumn.frame(width: 370)
+                            ScrollView {
+                                leftColumn
+                            }
+                            .frame(width: 370)
                             PlaygroundView(viewModel: playgroundViewModel, diagnosticsViewModel: diagnosticsViewModel)
                                 .frame(maxWidth: .infinity)
                         }
@@ -43,6 +46,25 @@ struct LessonFlowView: View {
 
     private var leftColumn: some View {
         VStack(spacing: 12) {
+            GlassCard {
+                VStack(alignment: .leading, spacing: 10) {
+                    Label("Chapter Start", systemImage: "play.circle.fill")
+                        .font(Typography.section)
+                        .foregroundStyle(Theme.accent)
+
+                    Text("Read the goal, then tap Start Chapter to load this lesson setup and begin.")
+                        .font(Typography.body)
+                        .foregroundStyle(.secondary)
+
+                    PrimaryActionButton(
+                        title: viewModel.isCurrentLessonComplete ? "Restart Chapter" : "Start Chapter",
+                        systemImage: "play.fill"
+                    ) {
+                        viewModel.applyCurrentSetup()
+                    }
+                }
+            }
+
             LessonView(
                 lesson: viewModel.currentLesson,
                 progressText: viewModel.progressText,
@@ -60,8 +82,6 @@ struct LessonFlowView: View {
 
             HStack(spacing: 8) {
                 Button("Previous") { viewModel.previousLesson() }
-                    .buttonStyle(.bordered)
-                Button("Apply Setup") { viewModel.applyCurrentSetup() }
                     .buttonStyle(.bordered)
                 Button("Next") { viewModel.nextLesson() }
                     .buttonStyle(.borderedProminent)
