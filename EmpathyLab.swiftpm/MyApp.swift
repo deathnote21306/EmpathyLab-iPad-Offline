@@ -1,7 +1,7 @@
 import SwiftUI
 
-
-struct EmpathyLabApp: App {
+@main
+struct MyApp: App {
     var body: some Scene {
         WindowGroup {
             AppRootView()
