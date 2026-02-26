@@ -16,3 +16,9 @@ DerivedData/
 # Playgrounds metadata (keep if needed, but usually safe to ignore)
 timeline.xctimeline
 playground.xcworkspace.swiftpm/xcode/xcuserdata/
+
+# Xcode / Playgrounds generated
+.swiftpm/xcode/
+*.xcuserstate
+**/xcuserdata/
+.DS_Store
