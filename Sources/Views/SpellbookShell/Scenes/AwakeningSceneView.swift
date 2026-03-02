@@ -54,27 +54,27 @@ struct AwakeningSceneView: View {
             .offset(y: showTitle ? 0 : 20)
             .animation(.spring(response: 0.60, dampingFraction: 0.80), value: showTitle)
 
-            Spacer(minLength: 30)
+            Color.clear.frame(height: 30)
 
             // ── Chapter preview pills ──────────────────────────────────────
             HStack(spacing: 8) {
                 ForEach(Array(chapterInfo.enumerated()), id: \.offset) { i, chapter in
-                    VStack(spacing: 4) {
+                    VStack(spacing: 5) {
                         Text(chapter.numeral)
-                            .font(.system(size: 13, weight: .black, design: .rounded))
+                            .font(.system(size: 16, weight: .black, design: .rounded))
                             .foregroundStyle(chapter.color)
                         Text(chapter.label)
-                            .font(.custom("AvenirNext-DemiBold", size: 8))
+                            .font(.custom("AvenirNext-DemiBold", size: 10))
                             .tracking(0.5)
                             .foregroundStyle(chapter.color.opacity(0.70))
                     }
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 8)
+                    .padding(.horizontal, 13)
+                    .padding(.vertical, 10)
                     .background(chapter.color.opacity(0.08),
-                                in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                                in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                     .overlay(
-                        RoundedRectangle(cornerRadius: 10, style: .continuous)
-                            .stroke(chapter.color.opacity(0.24), lineWidth: 1)
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .stroke(chapter.color.opacity(0.28), lineWidth: 1)
                     )
                     .opacity(showChapters ? 1 : 0)
                     .offset(y: showChapters ? 0 : 10)
@@ -85,9 +85,9 @@ struct AwakeningSceneView: View {
                     )
                 }
             }
-            .padding(.horizontal, 20)
+            .padding(.horizontal, 14)
 
-            Spacer(minLength: 28)
+            Color.clear.frame(height: 28)
 
             // ── Magic circle ───────────────────────────────────────────────
             ZStack {
@@ -109,6 +109,7 @@ struct AwakeningSceneView: View {
                         .id(id)
                 }
             }
+            .frame(width: 214, height: 214)
             .contentShape(Circle())
             .onTapGesture {
                 guard !isNavigating else { return }
@@ -124,20 +125,32 @@ struct AwakeningSceneView: View {
             .accessibilityLabel("Tap to begin the Neural Spellbook")
             .accessibilityAddTraits(.isButton)
 
-            Spacer(minLength: 24)
+            // Fixed spacing — prevents layout shift during entrance animations
+            Color.clear.frame(height: 24)
 
             // ── Tap hint ───────────────────────────────────────────────────
             TapHintLabel()
                 .opacity(showHint ? 1 : 0)
                 .animation(.easeIn(duration: 0.40), value: showHint)
 
-            Spacer(minLength: 20)
+            Color.clear.frame(height: 20)
 
             // ── Meta info ──────────────────────────────────────────────────
             Text("5 interactive chapters  ·  no coding required")
                 .font(.custom("AvenirNext-DemiBold", size: 11))
                 .tracking(1.2)
                 .foregroundStyle(Color(red: 0.55, green: 0.50, blue: 0.80).opacity(0.45))
+                .multilineTextAlignment(.center)
+                .opacity(showSub ? 1 : 0)
+                .animation(.easeIn(duration: 0.40), value: showSub)
+
+            Spacer(minLength: 12)
+
+            // ── Challenge credit ───────────────────────────────────────────
+            Text("✦ Apple Swift Student Challenge 2026 · Williams Lendjoungou")
+                .font(.custom("AvenirNext-DemiBold", size: 11))
+                .tracking(0.8)
+                .foregroundStyle(gold.opacity(0.55))
                 .multilineTextAlignment(.center)
                 .opacity(showSub ? 1 : 0)
                 .animation(.easeIn(duration: 0.40), value: showSub)
@@ -180,25 +193,18 @@ private struct PulsingRing: View {
     }
 }
 
-// MARK: - Tap hint with blinking chevron
+// MARK: - Tap hint
 
 private struct TapHintLabel: View {
-    @State private var blink = false
-
     var body: some View {
         HStack(spacing: 8) {
             Image(systemName: "hand.tap.fill")
                 .font(.system(size: 16))
-                .foregroundStyle(Color(red: 0.91, green: 0.72, blue: 0.29).opacity(blink ? 0.9 : 0.45))
+                .foregroundStyle(Color(red: 0.91, green: 0.72, blue: 0.29).opacity(0.75))
             Text("TAP TO BEGIN")
                 .font(.custom("AvenirNext-DemiBold", size: 14))
                 .tracking(3.5)
-                .foregroundStyle(Color(red: 0.91, green: 0.72, blue: 0.29).opacity(blink ? 0.9 : 0.45))
-        }
-        .onAppear {
-            withAnimation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true)) {
-                blink = true
-            }
+                .foregroundStyle(Color(red: 0.91, green: 0.72, blue: 0.29).opacity(0.75))
         }
     }
 }

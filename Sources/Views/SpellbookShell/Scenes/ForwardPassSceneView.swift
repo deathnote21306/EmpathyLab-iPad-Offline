@@ -225,6 +225,21 @@ struct ForwardPassSceneView: View {
                                 isPulsing: !didCast && !isCasting) { castPrediction() }
                 }
 
+                if didCast && !isCasting {
+                    VStack(spacing: 3) {
+                        Text("Prediction recorded: ŷ₁ = 0.68   ·   Truth = 1.0")
+                            .font(.custom("AvenirNext-DemiBold", size: 11))
+                            .tracking(1.2)
+                            .foregroundStyle(.white.opacity(0.32))
+                        Text("Loss from this pass → measured in Chapter II")
+                            .font(.system(size: 12, weight: .light, design: .serif))
+                            .italic()
+                            .foregroundStyle(Color(red: 0.85, green: 0.19, blue: 0.38).opacity(0.55))
+                    }
+                    .multilineTextAlignment(.center)
+                    .transition(.opacity)
+                }
+
                 if didCast {
                     SpellButton(title: "Proceed to Chapter II →", tone: .spirit, isPulsing: true) {
                         onNext()
@@ -732,9 +747,11 @@ private struct ForwardNetworkLayout {
         var anchors: [CGPoint] = []
 
         for layerIndex in 0..<nodeData.count {
-            anchors.append(CGPoint(x: xPositions[layerIndex], y: 22))
             let layer = nodeData[layerIndex]
             let count = layer.count
+            // Place label just above the topmost node of this layer
+            let topNodeY = size.height * 0.46 - CGFloat(count - 1) / 2.0 * spacing[layerIndex]
+            anchors.append(CGPoint(x: xPositions[layerIndex], y: topNodeY - 44))
             for nodeIndex in 0..<count {
                 let y = size.height * 0.46 + (CGFloat(nodeIndex) - CGFloat(count - 1) / 2) * spacing[layerIndex]
                 let snapshot = layer[nodeIndex]

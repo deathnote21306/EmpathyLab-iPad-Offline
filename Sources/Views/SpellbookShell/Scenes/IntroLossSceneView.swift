@@ -5,7 +5,6 @@ struct IntroLossSceneView: View {
 
     var body: some View {
         IntroBeatSceneTemplate(
-            canvas: { IntroBeat1Canvas() },
             chapterNumber: 2,
             chapterTitle: "Measuring\nthe Mistake",
             missionText: "See exactly how wrong the AI's first guess was — and watch that error become a single number.",

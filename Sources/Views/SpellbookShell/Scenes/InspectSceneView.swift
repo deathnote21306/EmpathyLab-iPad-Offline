@@ -131,15 +131,29 @@ struct InspectSceneView: View {
                     .padding(.bottom, 6)
 
                     // ── INVITE / SELECTION HEADER ─────────────────────────────
-                    Text(selectedRune == nil
-                         ? "✦  SELECT ANY RUNE TO REVEAL ITS SOUL  ✦"
-                         : "✦  \(selectedRune!.nodeID)  ·  \(selectedRune!.name.uppercased())  ·  \(selectedRune!.layer.uppercased())  ✦")
-                        .font(.custom("AvenirNext-DemiBold", size: 11))
-                        .tracking(2.5)
-                        .foregroundStyle(goldC.opacity(0.70))
-                        .multilineTextAlignment(.center)
-                        .padding(.bottom, 8)
-                        .animation(.easeInOut(duration: 0.25), value: selectedRuneID)
+                    VStack(spacing: 5) {
+                        Text(selectedRune == nil
+                             ? "Tap any neuron to see what it learned and how it contributed"
+                             : "✦  \(selectedRune!.nodeID)  ·  \(selectedRune!.name.uppercased())  ·  \(selectedRune!.layer.uppercased())  ✦")
+                            .font(selectedRune == nil
+                                  ? .system(size: 14, weight: .regular, design: .serif)
+                                  : .custom("AvenirNext-DemiBold", size: 11))
+                            .tracking(selectedRune == nil ? 0 : 2.5)
+                            .foregroundStyle(goldC.opacity(selectedRune == nil ? 0.55 : 0.70))
+                            .multilineTextAlignment(.center)
+                            .animation(.easeInOut(duration: 0.25), value: selectedRuneID)
+
+                        if selectedRune == nil {
+                            Text("Activation = how strongly a neuron fired · 0.00 = silent · 1.00 = full power")
+                                .font(.custom("AvenirNext-DemiBold", size: 10))
+                                .tracking(0.5)
+                                .foregroundStyle(.white.opacity(0.28))
+                                .multilineTextAlignment(.center)
+                        }
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 10)
+                    .animation(.easeInOut(duration: 0.25), value: selectedRuneID)
 
                     // ── LAYERED RUNE GRID ──────────────────────────────────────
                     let isWide = geo.size.width > 620
@@ -401,7 +415,23 @@ private struct InspectDetailPanel: View {
                 .onTapGesture { onDismiss() }
 
             ScrollView {
-                VStack(alignment: .leading, spacing: 14) {
+                VStack(alignment: .leading, spacing: 16) {
+
+                    // ── Context strip ─────────────────────────────────────────
+                    HStack(spacing: 8) {
+                        Image(systemName: "info.circle.fill")
+                            .font(.system(size: 11))
+                            .foregroundStyle(runeColor.opacity(0.60))
+                        Text("You are looking at one neuron inside the network — its firing strength, its role, and its share of the prediction error.")
+                            .font(.system(size: 13, weight: .regular, design: .serif))
+                            .foregroundStyle(.white.opacity(0.50))
+                            .lineSpacing(3)
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 9)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(.white.opacity(0.04),
+                                in: RoundedRectangle(cornerRadius: 10, style: .continuous))
 
                     // ── Hero row ──────────────────────────────────────────────
                     HStack(alignment: .center, spacing: 16) {
@@ -434,76 +464,118 @@ private struct InspectDetailPanel: View {
                             Text(String(format: "%.2f", rune.activation))
                                 .font(.system(size: 38, weight: .bold, design: .monospaced))
                                 .foregroundStyle(runeColor)
-                            Text("activation")
+                            Text("ACTIVATION")
                                 .font(.custom("AvenirNext-DemiBold", size: 9))
                                 .tracking(1.5)
                                 .foregroundStyle(.white.opacity(0.30))
+                            Text("0 = off · 1 = full")
+                                .font(.custom("AvenirNext-Regular", size: 9))
+                                .foregroundStyle(runeColor.opacity(0.45))
                         }
                     }
 
-                    // Activation bar
-                    GeometryReader { g in
-                        ZStack(alignment: .leading) {
-                            Capsule().fill(.white.opacity(0.06))
-                            Capsule()
-                                .fill(LinearGradient(
-                                    colors: [runeColor, runeColor.opacity(0.45)],
-                                    startPoint: .leading, endPoint: .trailing
-                                ))
-                                .frame(width: g.size.width * CGFloat(rune.activation))
-                                .shadow(color: runeColor.opacity(0.50), radius: 8)
+                    // Activation bar with end labels
+                    VStack(spacing: 4) {
+                        GeometryReader { g in
+                            ZStack(alignment: .leading) {
+                                Capsule().fill(.white.opacity(0.06))
+                                Capsule()
+                                    .fill(LinearGradient(
+                                        colors: [runeColor, runeColor.opacity(0.45)],
+                                        startPoint: .leading, endPoint: .trailing
+                                    ))
+                                    .frame(width: g.size.width * CGFloat(rune.activation))
+                                    .shadow(color: runeColor.opacity(0.50), radius: 8)
+                            }
+                        }
+                        .frame(height: 8)
+                        HStack {
+                            Text("Silent")
+                                .font(.custom("AvenirNext-Regular", size: 9))
+                                .foregroundStyle(.white.opacity(0.22))
+                            Spacer()
+                            Text("Full power")
+                                .font(.custom("AvenirNext-Regular", size: 9))
+                                .foregroundStyle(.white.opacity(0.22))
                         }
                     }
-                    .frame(height: 8)
 
                     // Badges
                     HStack(spacing: 10) {
                         inspectBadge(title: "Connections", value: rune.weights, tint: Color(red: 0.63, green: 0.50, blue: 1.0))
-                        inspectBadge(title: "Gradient", value: rune.gradient, tint: Color(red: 0.24, green: 0.84, blue: 0.75))
-                        inspectBadge(title: "Capacity", value: "\(Int(rune.activation * 100))%", tint: runeColor)
+                        inspectBadge(title: "Error share", value: gradientLabel, tint: gradientColor)
+                        inspectBadge(title: "Fired at", value: "\(Int(rune.activation * 100))%", tint: runeColor)
                     }
 
-                    // ── Forward pass context ──────────────────────────────────
-                    VStack(alignment: .leading, spacing: 6) {
+                    // ── What it did ───────────────────────────────────────────
+                    VStack(alignment: .leading, spacing: 8) {
                         HStack(spacing: 6) {
                             Image(systemName: "arrow.forward.circle.fill")
                                 .font(.system(size: 11))
                                 .foregroundStyle(runeColor.opacity(0.75))
-                            Text("DURING THE FORWARD PASS")
-                                .font(.custom("AvenirNext-DemiBold", size: 9.5))
+                            Text("WHAT THIS NEURON DID")
+                                .font(.custom("AvenirNext-DemiBold", size: 10))
                                 .tracking(2)
                                 .foregroundStyle(runeColor.opacity(0.75))
                         }
                         Text(rune.forwardRole)
-                            .font(.system(size: 15, weight: .regular, design: .serif))
-                            .foregroundStyle(.white.opacity(0.72))
-                            .lineSpacing(4)
+                            .font(.system(size: 17, weight: .regular, design: .serif))
+                            .foregroundStyle(.white.opacity(0.82))
+                            .lineSpacing(5)
                     }
-                    .padding(13)
+                    .padding(14)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .background(runeColor.opacity(0.08),
                                 in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                     .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous)
                         .stroke(runeColor.opacity(0.22), lineWidth: 1))
 
-                    // Description
-                    Text(rune.description)
-                        .font(.system(size: 17, weight: .regular, design: .serif))
-                        .foregroundStyle(.white.opacity(0.84))
-                        .lineSpacing(4)
+                    // ── Why it matters ────────────────────────────────────────
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack(spacing: 6) {
+                            Image(systemName: "lightbulb.fill")
+                                .font(.system(size: 11))
+                                .foregroundStyle(Color(red: 0.91, green: 0.72, blue: 0.29).opacity(0.75))
+                            Text("WHY THIS MATTERS")
+                                .font(.custom("AvenirNext-DemiBold", size: 10))
+                                .tracking(2)
+                                .foregroundStyle(Color(red: 0.91, green: 0.72, blue: 0.29).opacity(0.75))
+                        }
+                        Text(rune.description)
+                            .font(.system(size: 17, weight: .regular, design: .serif))
+                            .foregroundStyle(.white.opacity(0.82))
+                            .lineSpacing(5)
+                    }
+                    .padding(14)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color(red: 0.91, green: 0.72, blue: 0.29).opacity(0.05),
+                                in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .stroke(Color(red: 0.91, green: 0.72, blue: 0.29).opacity(0.16), lineWidth: 1))
 
                     // Math reveal
                     if mathReveal {
-                        Text(rune.math)
-                            .font(.system(size: 13, weight: .medium, design: .monospaced))
-                            .foregroundStyle(Color(red: 0.24, green: 0.84, blue: 0.75))
-                            .lineSpacing(4)
-                            .padding(14)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .background(Color(red: 0.24, green: 0.84, blue: 0.75).opacity(0.08),
-                                        in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-                            .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                .stroke(Color(red: 0.24, green: 0.84, blue: 0.75).opacity(0.22), lineWidth: 1))
+                        VStack(alignment: .leading, spacing: 8) {
+                            HStack(spacing: 6) {
+                                Image(systemName: "function")
+                                    .font(.system(size: 11))
+                                    .foregroundStyle(Color(red: 0.24, green: 0.84, blue: 0.75).opacity(0.75))
+                                Text("THE MATH BEHIND IT")
+                                    .font(.custom("AvenirNext-DemiBold", size: 10))
+                                    .tracking(2)
+                                    .foregroundStyle(Color(red: 0.24, green: 0.84, blue: 0.75).opacity(0.75))
+                            }
+                            Text(rune.math)
+                                .font(.system(size: 13, weight: .medium, design: .monospaced))
+                                .foregroundStyle(Color(red: 0.24, green: 0.84, blue: 0.75))
+                                .lineSpacing(5)
+                        }
+                        .padding(14)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(Color(red: 0.24, green: 0.84, blue: 0.75).opacity(0.08),
+                                    in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                        .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .stroke(Color(red: 0.24, green: 0.84, blue: 0.75).opacity(0.22), lineWidth: 1))
                     }
                 }
                 .padding(.horizontal, 20)
@@ -520,6 +592,21 @@ private struct InspectDetailPanel: View {
                 .stroke(runeColor.opacity(0.28), lineWidth: 1)
         )
         .shadow(color: runeColor.opacity(0.20), radius: 30, y: -8)
+    }
+
+    // Gradient badge helpers
+    private var gradientColor: Color {
+        let g = Double(rune.gradient) ?? 0
+        if g > 0.025 { return Color(red: 0.85, green: 0.19, blue: 0.38) }
+        if g > 0.015 { return Color(red: 0.91, green: 0.72, blue: 0.29) }
+        return Color(red: 0.24, green: 0.84, blue: 0.75)
+    }
+
+    private var gradientLabel: String {
+        let g = Double(rune.gradient) ?? 0
+        if g > 0.025 { return "HEAVY" }
+        if g > 0.015 { return "MED" }
+        return "LIGHT"
     }
 
     private func inspectBadge(title: String, value: String, tint: Color) -> some View {

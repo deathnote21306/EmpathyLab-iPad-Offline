@@ -4,7 +4,6 @@ import SwiftUI
 @MainActor
 public final class AppState: ObservableObject {
     public enum Route {
-        case home
         case guided
         case sandbox
     }
@@ -40,6 +39,6 @@ public final class AppState: ObservableObject {
     }
 
     public func goHome() {
-        route = .home
+        startGuidedJourney()
     }
 }

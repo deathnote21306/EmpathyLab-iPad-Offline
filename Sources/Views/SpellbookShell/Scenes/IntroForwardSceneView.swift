@@ -5,7 +5,6 @@ struct IntroForwardSceneView: View {
 
     var body: some View {
         IntroBeatSceneTemplate(
-            canvas: { IntroBeat0Canvas() },
             chapterNumber: 1,
             chapterTitle: "How AI\nMakes Decisions",
             missionText: "Watch signals travel through the network — left to right, layer by layer — until a prediction appears.",

@@ -5,7 +5,6 @@ struct IntroInspectSceneView: View {
 
     var body: some View {
         IntroBeatSceneTemplate(
-            canvas: { IntroBeat4Canvas() },
             chapterNumber: 5,
             chapterTitle: "Look Inside\nthe AI",
             missionText: "Tap each neuron to reveal what it learned — its activation value, its role, and how much blame it carried.",

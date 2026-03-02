@@ -1,12 +1,16 @@
 import SwiftUI
+import UIKit
 
-private struct BackpropWeightChange: Identifiable {
-    let id = UUID()
+// MARK: - Layer data
+
+private struct BackpropLayerInfo {
     let name: String
-    let oldValue: String
-    let delta: String
-    let newValue: String
-    let layerIndex: Int
+    let subtitle: String
+    let correctedSubtitle: String
+    let nodes: Int
+    let blame: Double
+    let correctedBlame: Double
+    let color: Color
 }
 
 // MARK: - Scene
@@ -16,286 +20,469 @@ struct BackpropSceneView: View {
     let onOpenModal: (SpellModalKey) -> Void
     @Binding var mathReveal: Bool
 
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var step: Int = 0
+    @State private var correctedLayers: Set<Int> = []
+    @State private var showPencilHint = false
 
-    @State private var ritualProgress: Double = 0
-    @State private var ritualStartTime: Date? = nil
-    @State private var ritualDone = false
-    @State private var isAnimating = false
-    @State private var selectedLayerIndex: Int? = nil   // tapped layer for blame detail
+    private let crimson = Color(red: 0.85, green: 0.19, blue: 0.38)
+    private let spirit  = Color(red: 0.24, green: 0.84, blue: 0.75)
 
-    private let layers = [3, 4, 4, 2]
+    private var allDone: Bool { correctedLayers.count == layers.count }
 
-    private let layerBlame: [CGFloat] = [0.30, 0.46, 0.62, 0.86]
-
-    private let weightChanges: [BackpropWeightChange] = [
-        .init(name: "W input→hidden", oldValue: "0.500", delta: "+0.031", newValue: "0.531", layerIndex: 0),
-        .init(name: "W hidden I bias", oldValue: "−0.300", delta: "+0.019", newValue: "−0.281", layerIndex: 1),
-        .init(name: "W hidden II→out", oldValue: "0.800", delta: "−0.045", newValue: "0.755", layerIndex: 2)
+    private let layers: [BackpropLayerInfo] = [
+        .init(name: "OUTPUT",     subtitle: "The source of the mistake",
+              correctedSubtitle: "Weights nudged — output adjusted",
+              nodes: 2, blame: 0.86, correctedBlame: 0.52,
+              color: Color(red: 0.85, green: 0.19, blue: 0.38)),
+        .init(name: "DEEP LAYER", subtitle: "Close to the error",
+              correctedSubtitle: "Hidden patterns recalibrated",
+              nodes: 4, blame: 0.62, correctedBlame: 0.38,
+              color: Color(red: 1.00, green: 0.42, blue: 0.21)),
+        .init(name: "MID LAYER",  subtitle: "Further from the source",
+              correctedSubtitle: "Mid-layer features tuned",
+              nodes: 4, blame: 0.46, correctedBlame: 0.28,
+              color: Color(red: 0.91, green: 0.72, blue: 0.29)),
+        .init(name: "INPUT",      subtitle: "Faintest echo of the mistake",
+              correctedSubtitle: "Input weights refined",
+              nodes: 3, blame: 0.30, correctedBlame: 0.18,
+              color: Color(red: 0.63, green: 0.50, blue: 1.00)),
     ]
 
-    private var ritualMessage: String {
-        switch ritualProgress {
-        case ..<0.18: return "The spell remembers the mistake at the output layer first."
-        case ..<0.48: return "Gradients pull blame backward through the hidden runes."
-        case ..<0.82: return "Each thread receives its share of responsibility for the error."
-        default:      return ritualDone ? "The ritual is done. Weights corrected — loss falls." : "Correction reaches the earliest layers."
+    private var narratorText: String {
+        if allDone { return "Weights corrected. Blame shrinks across every layer — the network is now smarter." }
+        switch step {
+        case 0: return "The AI made a wrong prediction. Something went wrong — but where exactly?"
+        case 1: return "The output layer felt it first. It carries the heaviest blame."
+        case 2: return "It passes part of the blame to the layer behind it."
+        case 3: return "Blame keeps traveling, fading with each layer it crosses."
+        default: return "Every layer now holds a share of blame. Hold your Pencil on each one to correct it."
         }
     }
 
-    private var selectedLayerName: String {
-        switch selectedLayerIndex {
-        case 0: return "Input Layer"
-        case 1: return "Hidden I"
-        case 2: return "Hidden II"
-        case 3: return "Output Layer"
-        default: return ""
-        }
-    }
-
-    private var selectedBlameInfo: (blame: String, gradient: String, correction: String, explanation: String) {
-        switch selectedLayerIndex {
-        case 3: return ("86%", "0.045", "−0.045", "Output nodes receive the direct error signal. They know exactly how far the prediction was from truth.")
-        case 2: return ("62%", "0.031", "+0.031", "Second hidden layer: receives partial blame passed back from the output. The chain rule distributes responsibility.")
-        case 1: return ("46%", "0.019", "+0.019", "First hidden layer: further from the mistake, so blame is diluted further. Gradients vanish as they travel deeper.")
-        case 0: return ("30%", "0.007", "+0.007", "Input nodes absorb the least blame. They are first in the chain but last to receive correction signal.")
-        default: return ("—", "—", "—", "Tap a layer to see how blame is distributed during the backpropagation ritual.")
+    private var actionLabel: String {
+        switch step {
+        case 0:       return "REVEAL THE CULPRIT"
+        case 1, 2, 3: return "PASS BLAME DEEPER  ↓"
+        default:      return ""
         }
     }
 
     var body: some View {
         ZStack(alignment: .bottom) {
 
-            // Crimson ambient background for backprop
-            BackpropAmbientView(progress: ritualProgress, isAnimating: isAnimating)
+            BackpropAmbientView(step: allDone ? 5 : step)
 
-            // Full-screen canvas
-            BackpropCanvasView(
-                ritualStartTime: ritualStartTime,
-                ritualDone: ritualDone,
-                isAnimating: isAnimating,
-                selectedLayerIndex: selectedLayerIndex,
-                onTapLayer: { layerIndex in
-                    guard ritualDone else { return }
-                    withAnimation(.spring(response: 0.35, dampingFraction: 0.82)) {
-                        selectedLayerIndex = (selectedLayerIndex == layerIndex) ? nil : layerIndex
+            ScrollView(showsIndicators: false) {
+                VStack(spacing: 0) {
+
+                    // ── Chapter label
+                    HStack {
+                        Text("CHAPTER III · BACKPROPAGATION")
+                            .font(.custom("AvenirNext-DemiBold", size: 9.5))
+                            .tracking(3.5)
+                            .foregroundStyle(crimson.opacity(0.45))
+                        Spacer()
                     }
-                }
-            )
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .padding(.horizontal, 20)
+                    .padding(.top, 60)
 
-            // Bottom gradient
+                    Spacer(minLength: 16)
+
+                    // ── Narrator
+                    Text(narratorText)
+                        .font(.system(size: 16, weight: .regular, design: .serif))
+                        .foregroundStyle(.white.opacity(0.85))
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 28)
+                        .id("\(step)-\(allDone)")
+                        .transition(.opacity.combined(with: .offset(y: 5)))
+                        .animation(.easeInOut(duration: 0.35), value: step)
+                        .animation(.easeInOut(duration: 0.35), value: allDone)
+
+                    Spacer(minLength: 24)
+
+                    // ── Layer stack
+                    VStack(spacing: 0) {
+                        ForEach(Array(layers.enumerated()), id: \.offset) { index, layer in
+
+                            LayerBlameCard(
+                                layer: layer,
+                                isRevealed: step > index,
+                                isDone: correctedLayers.contains(index),
+                                isActive: step == index + 1,
+                                canCorrect: step >= 4 && !correctedLayers.contains(index),
+                                onCorrect: {
+                                    withAnimation(.spring(response: 0.55, dampingFraction: 0.78)) {
+                                        correctedLayers.insert(index)
+                                    }
+                                    let gen = UIImpactFeedbackGenerator(style: .heavy)
+                                    gen.impactOccurred()
+                                }
+                            )
+                            .padding(.horizontal, 16)
+
+                            if index < layers.count - 1 {
+                                BlameFlowConnector(
+                                    color: layer.color,
+                                    nextBlame: layers[index + 1].blame,
+                                    isVisible: step >= index + 2,
+                                    isActive: step == index + 2,
+                                    isDone: allDone
+                                )
+                            }
+                        }
+                    }
+
+                    Spacer(minLength: 130)
+                }
+            }
+
+            // ── Bottom gradient
             LinearGradient(
-                colors: [.clear, Color(red: 0.03, green: 0.01, blue: 0.07).opacity(0.98)],
+                colors: [.clear, Color(red: 0.03, green: 0.01, blue: 0.07).opacity(0.97)],
                 startPoint: .top, endPoint: .bottom
             )
-            .frame(height: 340)
+            .frame(height: 170)
             .allowsHitTesting(false)
 
-            // Bottom panel
-            VStack(spacing: 12) {
+            // ── Pencil hint banner (appears when all layers are revealed)
+            if showPencilHint {
+                InteractionHintBanner(
+                    icon: "applepencil",
+                    text: "Hold your Apple Pencil — or finger — on each layer to apply the correction"
+                )
+                .padding(.horizontal, 18)
+                .padding(.bottom, 185)
+                .transition(.opacity.combined(with: .offset(y: 6)))
+            }
 
-                // Status chips
-                HStack(spacing: 8) {
-                    BackpropStatusChip(
-                        title: isAnimating ? "Ritual active" : (ritualDone ? "Correction complete" : "Awaiting ritual"),
-                        tint: isAnimating ? Color(red: 0.85, green: 0.19, blue: 0.38) : (ritualDone ? Color(red: 0.24, green: 0.84, blue: 0.75) : Color(red: 0.86, green: 0.85, blue: 1.0))
-                    )
-                    if ritualDone {
-                        BackpropStatusChip(title: "↓ 41% improvement", tint: Color(red: 0.24, green: 0.84, blue: 0.75))
-                        BackpropStatusChip(title: "New Loss: 0.31", tint: Color(red: 0.49, green: 0.38, blue: 1.0))
-                    }
-                }
-
-                // Dynamic content area
-                Group {
-                    if isAnimating {
-                        Text(ritualMessage)
-                            .font(.system(size: 16, weight: .regular, design: .serif))
-                            .foregroundStyle(.white.opacity(0.84))
-                            .multilineTextAlignment(.center)
-                            .padding(.horizontal, 20)
-                            .transition(.opacity)
-
-                    } else if ritualDone, let _ = selectedLayerIndex {
-                        // Layer blame detail card
-                        BackpropBlameCard(
-                            layerName: selectedLayerName,
-                            info: selectedBlameInfo,
-                            mathReveal: mathReveal
-                        )
-                        .transition(.move(edge: .bottom).combined(with: .opacity))
-
-                    } else if ritualDone {
-                        HStack(spacing: 6) {
-                            Image(systemName: "hand.tap.fill")
-                                .font(.system(size: 14))
-                                .foregroundStyle(Color(red: 0.85, green: 0.19, blue: 0.38))
-                            Text("TAP A LAYER TO SEE HOW BLAME IS SHARED")
-                                .font(.custom("AvenirNext-DemiBold", size: 12))
-                                .tracking(2.0)
-                                .foregroundStyle(Color(red: 0.85, green: 0.19, blue: 0.38))
-                        }
-                        .transition(.opacity)
-
-                    } else {
-                        VStack(spacing: 6) {
-                            Text("Press the button below to trace the error backwards")
-                                .font(.system(size: 16, weight: .semibold))
-                                .foregroundStyle(.white.opacity(0.90))
-                                .multilineTextAlignment(.center)
-                                .padding(.horizontal, 24)
-                            Text("Watch the red rays travel right → left, assigning blame")
-                                .font(.system(size: 13, weight: .regular))
-                                .foregroundStyle(Color(red: 0.85, green: 0.19, blue: 0.38).opacity(0.65))
-                                .multilineTextAlignment(.center)
-                        }
-                        .transition(.opacity)
-                    }
-                }
-                .animation(.easeInOut(duration: 0.35), value: isAnimating)
-                .animation(.spring(response: 0.4, dampingFraction: 0.82), value: selectedLayerIndex)
-                .animation(.easeInOut(duration: 0.35), value: ritualDone)
-
-                // Buttons
-                HStack(spacing: 10) {
-                    SpellButton(title: "✦ Why This Works", tone: .gold) { onOpenModal(.backprop) }
+            // ── Buttons
+            VStack(spacing: 8) {
+                if step < 4 {
                     SpellButton(
-                        title: isAnimating ? "🩸 Ritual in progress..." : (ritualDone ? "↺ Replay" : "🩸 Perform Ritual"),
+                        title: actionLabel,
                         tone: .danger,
-                        isPulsing: !ritualDone && !isAnimating
-                    ) { performRitual() }
+                        isPulsing: step == 0
+                    ) {
+                        withAnimation(.spring(response: 0.55, dampingFraction: 0.78)) {
+                            step = min(step + 1, 4)
+                        }
+                    }
+                } else if allDone {
+                    HStack(spacing: 10) {
+                        SpellButton(title: "✦ Deep Dive", tone: .gold) {
+                            onOpenModal(.backprop)
+                        }
+                        SpellButton(title: "Chapter IV →", tone: .spirit, isPulsing: true) {
+                            onNext()
+                        }
+                    }
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
                 }
 
-                if ritualDone {
-                    SpellButton(title: "Chapter IV →", tone: .spirit, isPulsing: true) { onNext() }
-                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                if step > 0 || !correctedLayers.isEmpty {
+                    Button("↺ Start over") {
+                        withAnimation(.easeInOut(duration: 0.30)) {
+                            step = 0
+                            correctedLayers = []
+                            showPencilHint = false
+                        }
+                    }
+                    .font(.custom("AvenirNext-DemiBold", size: 11))
+                    .foregroundStyle(.white.opacity(0.28))
+                    .transition(.opacity)
                 }
             }
             .padding(.horizontal, 18)
             .padding(.bottom, 90)
-            .animation(.easeInOut(duration: 0.35), value: ritualDone)
-
-            // Chapter label
-            VStack {
-                HStack {
-                    Text("CHAPTER III · BACKPROPAGATION")
-                        .font(.custom("AvenirNext-DemiBold", size: 9.5))
-                        .tracking(3.5)
-                        .foregroundStyle(Color(red: 0.85, green: 0.19, blue: 0.38).opacity(0.45))
-                    Spacer()
-                }
-                .padding(.horizontal, 20)
-                .padding(.top, 56)
-                Spacer()
-            }
-            .allowsHitTesting(false)
+            .animation(.easeInOut(duration: 0.35), value: step)
+            .animation(.easeInOut(duration: 0.35), value: allDone)
         }
-    }
-
-    private func performRitual() {
-        guard !isAnimating else { return }
-        ritualDone = false
-        selectedLayerIndex = nil
-        ritualProgress = 0
-        isAnimating = true
-        ritualStartTime = Date()
-
-        Task {
-            try? await Task.sleep(nanoseconds: reduceMotion ? 300_000_000 : 2_250_000_000)
-            await MainActor.run {
-                isAnimating = false
-                ritualDone = true
+        .onChange(of: step) { _, newStep in
+            if newStep == 4 {
+                withAnimation(.easeInOut(duration: 0.40)) { showPencilHint = true }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 6.0) {
+                    withAnimation(.easeOut(duration: 0.40)) { showPencilHint = false }
+                }
             }
         }
     }
 }
 
-// MARK: - Blame card
+// MARK: - Layer blame card
 
-private struct BackpropBlameCard: View {
-    let layerName: String
-    let info: (blame: String, gradient: String, correction: String, explanation: String)
-    let mathReveal: Bool
+private struct LayerBlameCard: View {
+    let layer: BackpropLayerInfo
+    let isRevealed: Bool
+    let isDone: Bool
+    let isActive: Bool
+    let canCorrect: Bool
+    let onCorrect: () -> Void
+
+    @State private var holdProgress: CGFloat = 0
+
+    private let spirit = Color(red: 0.24, green: 0.84, blue: 0.75)
+
+    private var displayColor: Color     { isDone ? spirit : layer.color }
+    private var displayBlame: Double    { isDone ? layer.correctedBlame : layer.blame }
+    private var displaySubtitle: String { isDone ? layer.correctedSubtitle : layer.subtitle }
 
     var body: some View {
-        HStack(alignment: .top, spacing: 16) {
-            VStack(alignment: .leading, spacing: 6) {
-                Text(layerName.uppercased())
-                    .font(.custom("AvenirNext-DemiBold", size: 10))
-                    .tracking(2.5)
-                    .foregroundStyle(Color(red: 0.85, green: 0.19, blue: 0.38).opacity(0.85))
-                Text(info.explanation)
-                    .font(.custom("AvenirNext-Regular", size: 14))
-                    .foregroundStyle(.white.opacity(0.68))
-                    .lineSpacing(3)
-                    .lineLimit(3)
-                if mathReveal {
-                    Text("W_new = W_old − α × gradient\n= W_old − 0.01 × \(info.gradient)")
-                        .font(.system(size: 12, weight: .medium, design: .monospaced))
-                        .foregroundStyle(Color(red: 0.24, green: 0.84, blue: 0.75))
-                        .lineSpacing(2)
+        ZStack {
+            // ── Main card content
+            HStack(spacing: 14) {
+
+                // Rune orbs
+                HStack(spacing: 5) {
+                    ForEach(0..<layer.nodes, id: \.self) { i in
+                        RuneOrb(isLit: isRevealed, color: displayColor, phase: Double(i) * 0.55)
+                    }
+                }
+                .frame(minWidth: 70, alignment: .leading)
+
+                // Name + subtitle
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(layer.name)
+                        .font(.system(size: 15, weight: .bold, design: .serif))
+                        .foregroundStyle(isRevealed ? displayColor : .white.opacity(0.22))
+
+                    if isRevealed {
+                        Text(displaySubtitle)
+                            .font(.custom("AvenirNext-Regular", size: 11))
+                            .foregroundStyle(displayColor.opacity(0.62))
+                            .transition(.opacity)
+                    }
+                }
+                .animation(.easeInOut(duration: 0.30), value: isRevealed)
+                .animation(.easeInOut(duration: 0.35), value: isDone)
+
+                Spacer()
+
+                // Blame % + bar
+                if isRevealed {
+                    VStack(alignment: .trailing, spacing: 5) {
+                        HStack(alignment: .lastTextBaseline, spacing: 4) {
+                            Text(String(format: "%.0f%%", displayBlame * 100))
+                                .font(.system(size: 24, weight: .bold, design: .monospaced))
+                                .foregroundStyle(displayColor)
+                                .contentTransition(.numericText())
+                                .animation(.spring(response: 0.55, dampingFraction: 0.72), value: isDone)
+
+                            if isDone {
+                                let delta = Int(round((layer.correctedBlame - layer.blame) * 100))
+                                Text(String(format: "%d", delta))
+                                    .font(.custom("AvenirNext-DemiBold", size: 10))
+                                    .foregroundStyle(spirit)
+                                    .transition(.scale(scale: 0.7).combined(with: .opacity))
+                            }
+                        }
+
+                        GeometryReader { proxy in
+                            ZStack(alignment: .leading) {
+                                Capsule().fill(.white.opacity(0.06))
+                                Capsule()
+                                    .fill(LinearGradient(
+                                        colors: [displayColor, displayColor.opacity(0.52)],
+                                        startPoint: .leading, endPoint: .trailing
+                                    ))
+                                    .frame(width: proxy.size.width * CGFloat(displayBlame))
+                                    .shadow(color: displayColor.opacity(0.50), radius: 6)
+                                    .animation(.spring(response: 0.65, dampingFraction: 0.74), value: isDone)
+                            }
+                        }
+                        .frame(width: 80, height: 6)
+
+                        // Bottom label: HOLD progress, CORRECTED, or BLAME
+                        if canCorrect {
+                            HStack(spacing: 3) {
+                                Image(systemName: holdProgress > 0 ? "circle.fill" : "hand.point.up.fill")
+                                    .font(.system(size: 7))
+                                Text(holdProgress > 0
+                                     ? String(format: "%.0f%%", holdProgress * 100)
+                                     : "HOLD")
+                                    .font(.custom("AvenirNext-DemiBold", size: 8))
+                                    .tracking(1.5)
+                            }
+                            .foregroundStyle(layer.color.opacity(0.85))
+                            .padding(.horizontal, 7)
+                            .padding(.vertical, 3)
+                            .background(layer.color.opacity(0.14), in: Capsule())
+                        } else {
+                            Text(isDone ? "CORRECTED ✦" : "BLAME")
+                                .font(.custom("AvenirNext-DemiBold", size: 8))
+                                .tracking(2)
+                                .foregroundStyle(isDone ? spirit.opacity(0.70) : .white.opacity(0.25))
+                                .animation(.easeInOut(duration: 0.25), value: isDone)
+                        }
+                    }
+                    .transition(.opacity.combined(with: .offset(x: 8)))
+                    .animation(.easeInOut(duration: 0.25), value: isDone)
                 }
             }
-            VStack(alignment: .trailing, spacing: 10) {
-                VStack(alignment: .trailing, spacing: 2) {
-                    Text(info.blame)
-                        .font(.system(size: 28, weight: .bold, design: .monospaced))
-                        .foregroundStyle(Color(red: 0.85, green: 0.19, blue: 0.38))
-                    Text("blame")
-                        .font(.custom("AvenirNext-DemiBold", size: 9))
-                        .tracking(1.5)
-                        .foregroundStyle(.white.opacity(0.32))
-                }
-                VStack(alignment: .trailing, spacing: 2) {
-                    Text(info.correction)
-                        .font(.system(size: 18, weight: .bold, design: .monospaced))
-                        .foregroundStyle(Color(red: 0.24, green: 0.84, blue: 0.75))
-                    Text("Δweight")
-                        .font(.custom("AvenirNext-DemiBold", size: 9))
-                        .tracking(1.5)
-                        .foregroundStyle(.white.opacity(0.32))
-                }
+            .padding(.vertical, 14)
+            .padding(.horizontal, 16)
+            .background(
+                displayColor.opacity(isRevealed ? (isDone ? 0.12 : (canCorrect ? 0.10 : 0.08)) : 0.03),
+                in: RoundedRectangle(cornerRadius: 16, style: .continuous)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .stroke(displayColor.opacity(isRevealed ? (isDone ? 0.50 : 0.32) : 0.08), lineWidth: 1.5)
+            )
+
+            // ── Hold progress ring
+            if canCorrect && holdProgress > 0 {
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .trim(from: 0, to: holdProgress)
+                    .stroke(
+                        layer.color,
+                        style: StrokeStyle(lineWidth: 3.5, lineCap: .round)
+                    )
+                    .allowsHitTesting(false)
+            }
+
+            // ── Touch capture overlay (finger or Pencil)
+            if canCorrect {
+                PencilHoldView(
+                    holdDuration: 1.5,
+                    onProgress: { p in holdProgress = p },
+                    onComplete: onCorrect
+                )
             }
         }
-        .padding(14)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color(red: 0.04, green: 0.02, blue: 0.10).opacity(0.97),
-                    in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous)
-            .stroke(Color(red: 0.85, green: 0.19, blue: 0.38).opacity(0.35), lineWidth: 1))
+        .opacity(isRevealed ? 1.0 : 0.38)
+        .scaleEffect(isActive ? 1.015 : 1.0)
+        .animation(.spring(response: 0.55, dampingFraction: 0.78), value: isRevealed)
+        .animation(.spring(response: 0.55, dampingFraction: 0.78), value: isDone)
+        .animation(.spring(response: 0.50, dampingFraction: 0.80), value: isActive)
+    }
+}
+
+// MARK: - Rune orb
+
+private struct RuneOrb: View {
+    let isLit: Bool
+    let color: Color
+    let phase: Double
+
+    var body: some View {
+        TimelineView(.animation(minimumInterval: 1.0 / 20.0)) { tl in
+            let t = tl.date.timeIntervalSinceReferenceDate
+            let pulse = isLit ? CGFloat(0.65 + 0.35 * sin(t * 2.2 + phase)) : 0
+
+            Circle()
+                .fill(
+                    RadialGradient(
+                        colors: [
+                            isLit
+                                ? color.opacity(0.80 * pulse)
+                                : Color(red: 0.10, green: 0.05, blue: 0.22),
+                            Color(red: 0.04, green: 0.02, blue: 0.10)
+                        ],
+                        center: .center, startRadius: 0, endRadius: 12
+                    )
+                )
+                .frame(width: 20, height: 20)
+                .overlay(
+                    Circle().stroke(
+                        isLit ? color.opacity(0.65 + 0.35 * pulse) : Color.white.opacity(0.10),
+                        lineWidth: 1.5
+                    )
+                )
+                .shadow(color: isLit ? color.opacity(0.45 * pulse) : .clear, radius: 6)
+        }
+    }
+}
+
+// MARK: - Blame flow connector
+
+private struct BlameFlowConnector: View {
+    let color: Color
+    let nextBlame: Double
+    let isVisible: Bool
+    let isActive: Bool
+    let isDone: Bool
+
+    private var displayColor: Color {
+        isDone ? Color(red: 0.24, green: 0.84, blue: 0.75) : color
+    }
+
+    var body: some View {
+        HStack(spacing: 0) {
+            Spacer()
+
+            VStack(spacing: 4) {
+                TimelineView(.animation(minimumInterval: 1.0 / 20.0)) { tl in
+                    let t    = tl.date.timeIntervalSinceReferenceDate
+                    let glow = isActive ? CGFloat(0.55 + 0.45 * sin(t * 3.5)) : CGFloat(1.0)
+
+                    VStack(spacing: 3) {
+                        Rectangle()
+                            .fill(isVisible
+                                  ? displayColor.opacity(0.65 * glow)
+                                  : Color.white.opacity(0.07))
+                            .frame(width: 2, height: 14)
+                            .shadow(color: isActive ? displayColor.opacity(0.60 * glow) : .clear,
+                                    radius: 6)
+
+                        Image(systemName: "arrowtriangle.down.fill")
+                            .font(.system(size: 8))
+                            .foregroundStyle(isVisible
+                                             ? displayColor.opacity(0.80 * glow)
+                                             : .white.opacity(0.07))
+                    }
+                }
+
+                if isVisible {
+                    Text(String(format: "%.0f%%  passed", nextBlame * 100))
+                        .font(.custom("AvenirNext-DemiBold", size: 9))
+                        .tracking(0.5)
+                        .foregroundStyle(displayColor.opacity(0.58))
+                        .transition(.opacity)
+                }
+            }
+            .frame(width: 90)
+            .animation(.easeInOut(duration: 0.35), value: isVisible)
+
+            Spacer()
+        }
+        .frame(height: isVisible ? 48 : 30)
+        .animation(.easeInOut(duration: 0.30), value: isVisible)
     }
 }
 
 // MARK: - Ambient background
 
 private struct BackpropAmbientView: View {
-    let progress: Double
-    let isAnimating: Bool
+    let step: Int
 
     var body: some View {
         TimelineView(.animation(minimumInterval: 1.0 / 20.0)) { tl in
             let t = tl.date.timeIntervalSinceReferenceDate
             Canvas { ctx, size in
-                let pulse = CGFloat(0.75 + 0.25 * sin(t * 0.7))
-                let intensity = CGFloat(0.06 + progress * 0.08) * pulse
+                let pulse     = CGFloat(0.75 + 0.25 * sin(t * 0.65))
+                let intensity = CGFloat(0.04 + Double(min(step, 4)) * 0.022) * pulse
+                let isDone    = step >= 5
+                let glowColor = isDone
+                    ? Color(red: 0.24, green: 0.84, blue: 0.75)
+                    : Color(red: 0.85, green: 0.19, blue: 0.38)
 
                 ctx.fill(
-                    Path(ellipseIn: CGRect(x: size.width * 0.55, y: -size.height * 0.05,
-                                           width: size.width * 0.70, height: size.height * 0.60)),
+                    Path(ellipseIn: CGRect(x: size.width * 0.50, y: -size.height * 0.08,
+                                           width: size.width * 0.72, height: size.height * 0.62)),
                     with: .radialGradient(
-                        Gradient(colors: [Color(red: 0.85, green: 0.19, blue: 0.38).opacity(intensity), .clear]),
-                        center: CGPoint(x: size.width * 0.90, y: 0),
-                        startRadius: 0, endRadius: size.width * 0.45
+                        Gradient(colors: [glowColor.opacity(intensity), .clear]),
+                        center: CGPoint(x: size.width * 0.88, y: 0),
+                        startRadius: 0, endRadius: size.width * 0.46
                     )
                 )
                 ctx.fill(
-                    Path(ellipseIn: CGRect(x: -size.width * 0.10, y: size.height * 0.35,
-                                           width: size.width * 0.55, height: size.height * 0.55)),
+                    Path(ellipseIn: CGRect(x: -size.width * 0.12, y: size.height * 0.30,
+                                           width: size.width * 0.58, height: size.height * 0.58)),
                     with: .radialGradient(
-                        Gradient(colors: [Color(red: 1.0, green: 0.42, blue: 0.21).opacity(intensity * 0.7), .clear]),
-                        center: CGPoint(x: 0, y: size.height * 0.65),
-                        startRadius: 0, endRadius: size.width * 0.38
+                        Gradient(colors: [Color(red: 1.0, green: 0.42, blue: 0.21).opacity(intensity * 0.65), .clear]),
+                        center: CGPoint(x: 0, y: size.height * 0.62),
+                        startRadius: 0, endRadius: size.width * 0.40
                     )
                 )
             }
@@ -303,377 +490,4 @@ private struct BackpropAmbientView: View {
         .allowsHitTesting(false)
         .ignoresSafeArea()
     }
-}
-
-// MARK: - Full-screen canvas
-
-private struct BackpropCanvasView: View {
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-
-    let ritualStartTime: Date?
-    let ritualDone: Bool
-    let isAnimating: Bool
-    let selectedLayerIndex: Int?
-    let onTapLayer: (Int) -> Void
-
-    private func liveProgress(at date: Date) -> Double {
-        guard isAnimating, let start = ritualStartTime else {
-            return ritualDone ? 1.0 : 0.0
-        }
-        let t = min(1.0, max(0, date.timeIntervalSince(start) / 2.2))
-        return t < 0.5 ? 2 * t * t : 1 - pow(-2 * t + 2, 2) / 2
-    }
-
-    private let layers = [3, 4, 4, 2]
-
-    var body: some View {
-        GeometryReader { proxy in
-            let layout = BackpropNetworkLayout(size: proxy.size, layers: layers)
-
-            ZStack {
-                TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { timeline in
-                    Canvas { context, _ in
-                        let p = liveProgress(at: timeline.date)
-                        drawEdges(context: &context, layout: layout,
-                                  timeline: timeline.date.timeIntervalSinceReferenceDate,
-                                  progress: p)
-                        drawNodes(context: &context, layout: layout,
-                                  timeline: timeline.date.timeIntervalSinceReferenceDate,
-                                  progress: p)
-                        drawLabels(context: &context, layout: layout)
-                    }
-                }
-
-                // Invisible tap targets per layer column
-                if ritualDone {
-                    ForEach(0..<4) { layerIndex in
-                        let anchor = layout.anchorPoints[layerIndex]
-                        Button {
-                            onTapLayer(layerIndex)
-                        } label: {
-                            Rectangle()
-                                .fill(Color.clear)
-                                .frame(width: proxy.size.width * 0.22, height: proxy.size.height * 0.75)
-                                .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
-                        .position(x: anchor.x, y: proxy.size.height * 0.46)
-                    }
-                }
-            }
-        }
-    }
-
-    private func drawEdges(context: inout GraphicsContext, layout: BackpropNetworkLayout, timeline: TimeInterval, progress: Double) {
-        let hasSelection = selectedLayerIndex != nil
-
-        for edge in layout.edges {
-            let path     = curvedPath(from: edge.from, to: edge.to)
-            let selected = (selectedLayerIndex == edge.segment || selectedLayerIndex == edge.segment + 1)
-            let wave     = edgeWave(for: edge, progress: progress)
-
-            // ── Always show dim skeleton ───────────────────────────────────
-            let baseOp: Double = hasSelection ? (selected ? 0.22 : 0.04) : 0.10
-            context.stroke(path, with: .color(Color(red: 0.49, green: 0.38, blue: 1.0).opacity(baseOp)),
-                           style: StrokeStyle(lineWidth: 1.0, lineCap: .round))
-
-            guard wave > 0.01 else { continue }
-
-            // ── Determine drawn path ───────────────────────────────────────
-            // Error flows right→left: the ray starts at edge.to (output/right)
-            // and extends toward edge.from (input/left) as wave increases.
-            // path goes from edge.from (left) to edge.to (right),
-            // so trimmedPath(from: 1-wave, to: 1) draws the right-end portion.
-            let isProgressing = isAnimating && wave < 0.995
-            let drawnPath: Path = isProgressing
-                ? path.trimmedPath(from: 1.0 - wave, to: 1.0)
-                : path
-
-            // ── LAYER 1: Error glow ────────────────────────────────────────
-            let glowOp: Double = hasSelection ? (selected ? 0.22 : 0.0) : 0.08 + wave * 0.14
-            if glowOp > 0.01 {
-                context.stroke(drawnPath,
-                               with: .color(Color(red: 0.85, green: 0.19, blue: 0.38).opacity(glowOp)),
-                               style: StrokeStyle(lineWidth: 9, lineCap: .round))
-            }
-
-            // ── LAYER 2: Error gradient mid ────────────────────────────────
-            let midOp: Double = hasSelection ? (selected ? 0.75 : 0.03) : 0.28 + wave * 0.55
-            context.stroke(drawnPath, with: .linearGradient(
-                Gradient(colors: [
-                    Color(red: 0.85, green: 0.19, blue: 0.38).opacity(midOp),
-                    Color(red: 1.0,  green: 0.42, blue: 0.21).opacity(midOp * 0.70),
-                    Color(red: 0.91, green: 0.72, blue: 0.29).opacity(midOp * 0.45)
-                ]),
-                startPoint: edge.to,   // gradient: output→input direction
-                endPoint: edge.from
-            ), style: StrokeStyle(lineWidth: 2.0 + wave * 1.8, lineCap: .round))
-
-            // ── LAYER 3: Bright core ───────────────────────────────────────
-            let coreOp: Double = hasSelection ? (selected ? 0.85 : 0.01) : 0.22 + wave * 0.50
-            if coreOp > 0.01 {
-                context.stroke(drawnPath,
-                               with: .color(Color(red: 0.85, green: 0.19, blue: 0.38).opacity(coreOp * 0.70)),
-                               style: StrokeStyle(lineWidth: 0.8, lineCap: .round))
-            }
-
-            // ── Tip spark — travels from output toward input ───────────────
-            if isProgressing {
-                // Leading edge of the ray: starts at edge.to, moves toward edge.from
-                let tip = CGPoint(
-                    x: edge.to.x + CGFloat(wave) * (edge.from.x - edge.to.x),
-                    y: edge.to.y + CGFloat(wave) * (edge.from.y - edge.to.y)
-                )
-                let flicker = CGFloat(0.72 + 0.28 * sin(timeline * 14.0 + Double(edge.segment) * 1.3))
-                let sparkR  = 5.5 * flicker
-
-                // Bright inner core
-                context.fill(
-                    Path(ellipseIn: CGRect(x: tip.x - sparkR, y: tip.y - sparkR,
-                                          width: sparkR * 2, height: sparkR * 2)),
-                    with: .radialGradient(
-                        Gradient(colors: [Color.white.opacity(0.95),
-                                          Color(red: 0.85, green: 0.19, blue: 0.38).opacity(0.78),
-                                          .clear]),
-                        center: tip, startRadius: 0, endRadius: sparkR
-                    )
-                )
-                // Outer halo
-                context.fill(
-                    Path(ellipseIn: CGRect(x: tip.x - sparkR * 2.8, y: tip.y - sparkR * 2.8,
-                                          width: sparkR * 5.6, height: sparkR * 5.6)),
-                    with: .radialGradient(
-                        Gradient(colors: [Color(red: 0.85, green: 0.19, blue: 0.38).opacity(0.40 * flicker),
-                                          .clear]),
-                        center: tip, startRadius: 0, endRadius: sparkR * 2.8
-                    )
-                )
-            }
-
-            // ── Shimmer ripple (settled state) ─────────────────────────────
-            if wave > 0.5 && !hasSelection {
-                let shimmer = 0.12 + 0.12 * sin(timeline * 2.2 + Double(edge.segment) * 1.5)
-                context.stroke(drawnPath,
-                               with: .color(Color(red: 0.85, green: 0.19, blue: 0.38).opacity(shimmer)),
-                               style: StrokeStyle(lineWidth: 2.0, lineCap: .round))
-            }
-        }
-    }
-
-    private func drawNodes(context: inout GraphicsContext, layout: BackpropNetworkLayout, timeline: TimeInterval, progress: Double) {
-        let hasSelection = selectedLayerIndex != nil
-
-        for node in layout.nodes {
-            let blame = nodeBlame(for: node, progress: progress)
-            let isSelectedLayer = selectedLayerIndex == node.layerIndex
-            let radius: CGFloat = 9.5 + blame * 5 + (isSelectedLayer ? 3 : 0)
-            let tint = blame > 0.2 ? Color(red: 0.85, green: 0.19, blue: 0.38) : Color(red: 0.49, green: 0.38, blue: 1.0)
-            let dimmed = hasSelection && !isSelectedLayer
-
-            // Halo
-            let hR = radius * 3.0
-            let haloOp: Double = dimmed ? 0.04 : (0.10 + Double(blame) * 0.20)
-            context.fill(
-                Path(ellipseIn: CGRect(x: node.point.x - hR, y: node.point.y - hR, width: hR * 2, height: hR * 2)),
-                with: .radialGradient(
-                    Gradient(colors: [tint.opacity(haloOp), .clear]),
-                    center: node.point, startRadius: 0, endRadius: hR
-                )
-            )
-
-            // Node fill
-            let rect = CGRect(x: node.point.x - radius, y: node.point.y - radius, width: radius * 2, height: radius * 2)
-            context.fill(
-                Path(ellipseIn: rect),
-                with: .radialGradient(
-                    Gradient(colors: [
-                        blame > 0.25 ? Color(red: 0.55, green: 0.10, blue: 0.24) : Color(red: 0.12, green: 0.06, blue: 0.26),
-                        Color(red: 0.04, green: 0.02, blue: 0.10)
-                    ]),
-                    center: CGPoint(x: node.point.x - 2, y: node.point.y - 2),
-                    startRadius: 1, endRadius: radius
-                )
-            )
-
-            // Node border
-            let borderOp: Double = dimmed ? 0.22 : (isSelectedLayer ? 0.95 : 0.72)
-            context.stroke(Path(ellipseIn: rect), with: .color(tint.opacity(borderOp)),
-                           lineWidth: isSelectedLayer ? 2.0 : 1.1)
-
-            // Selected layer invite pulse
-            if ritualDone && !hasSelection {
-                let invitePulse = 0.25 + 0.20 * CGFloat(sin(timeline * 1.8 + Double(node.layerIndex) * 1.4 + Double(node.index) * 0.5))
-                let inviteR = radius + 7 + 3 * CGFloat(sin(timeline * 1.8 + Double(node.index) * 0.5))
-                context.stroke(
-                    Path(ellipseIn: CGRect(x: node.point.x - inviteR, y: node.point.y - inviteR, width: inviteR * 2, height: inviteR * 2)),
-                    with: .color(tint.opacity(invitePulse)),
-                    style: StrokeStyle(lineWidth: 1.3, dash: [3, 4])
-                )
-            }
-
-            // Blame value label post-ritual
-            if ritualDone {
-                let blameVal = [0.30, 0.46, 0.62, 0.86][node.layerIndex]
-                let pulsing = 0.65 + 0.35 * sin(timeline * 2.0 + Double(node.index))
-                let labelOp: Double = dimmed ? 0.20 : pulsing
-                context.draw(
-                    Text(String(format: "%.0f%%", blameVal * 100))
-                        .font(.custom("AvenirNext-DemiBold", size: 10))
-                        .foregroundStyle(Color(red: 0.85, green: 0.19, blue: 0.38).opacity(labelOp)),
-                    at: CGPoint(x: node.point.x, y: node.point.y + radius + 12)
-                )
-            }
-        }
-    }
-
-    private func drawLabels(context: inout GraphicsContext, layout: BackpropNetworkLayout) {
-        let labels = ["INPUT", "HIDDEN I", "HIDDEN II", "OUTPUT"]
-        let hasSelection = selectedLayerIndex != nil
-        for (index, label) in labels.enumerated() {
-            let point = layout.anchorPoints[index]
-            let highlighted = selectedLayerIndex == index
-            let op: Double = hasSelection ? (highlighted ? 0.80 : 0.18) : 0.36
-            context.draw(
-                Text(label)
-                    .font(.custom("AvenirNext-DemiBold", size: 11))
-                    .foregroundStyle(Color(red: 0.91, green: 0.72, blue: 0.29).opacity(op)),
-                at: point
-            )
-        }
-
-        // ── Δweight column labels (shown post-ritual above each layer) ─────
-        if ritualDone {
-            let deltas = ["+0.007", "+0.019", "+0.031", "−0.045"]
-            let spiritC  = Color(red: 0.24, green: 0.84, blue: 0.75)
-            let crimsonC = Color(red: 0.85, green: 0.19, blue: 0.38)
-            let deltaColors: [Color] = [spiritC, spiritC, spiritC, crimsonC]
-
-            for (index, delta) in deltas.enumerated() {
-                let point = layout.anchorPoints[index]
-                let highlighted = !hasSelection || selectedLayerIndex == index
-                let op: Double = highlighted ? 0.88 : 0.20
-
-                context.draw(
-                    Text(delta)
-                        .font(.system(size: 12, weight: .bold, design: .monospaced))
-                        .foregroundStyle(deltaColors[index].opacity(op)),
-                    at: CGPoint(x: point.x, y: point.y + 18)
-                )
-                context.draw(
-                    Text("Δw")
-                        .font(.custom("AvenirNext-DemiBold", size: 8))
-                        .foregroundStyle(Color.white.opacity(op * 0.40)),
-                    at: CGPoint(x: point.x, y: point.y + 32)
-                )
-            }
-        }
-
-        // Error direction label
-        context.draw(
-            Text("← ERROR PROPAGATES BACKWARD")
-                .font(.custom("AvenirNext-DemiBold", size: 10))
-                .tracking(1.8)
-                .foregroundStyle(Color(red: 0.85, green: 0.19, blue: 0.38).opacity((ritualDone || isAnimating) ? 0.65 : 0.22)),
-            at: CGPoint(x: layout.centerX, y: layout.bottomY)
-        )
-    }
-
-    private func curvedPath(from start: CGPoint, to end: CGPoint) -> Path {
-        var path = Path()
-        path.move(to: start)
-        path.addLine(to: end)
-        return path
-    }
-
-    private func edgeWave(for edge: BackpropEdge, progress: Double) -> Double {
-        if ritualDone && !isAnimating { return 1 }
-        let windows: [(Double, Double)] = [(0.70, 0.20), (0.44, 0.24), (0.18, 0.24)]
-        guard edge.segment < windows.count else { return 0 }
-        let window = windows[edge.segment]
-        return max(0, min(1, (progress - window.0) / window.1))
-    }
-
-    private func nodeBlame(for node: BackpropNode, progress: Double) -> CGFloat {
-        if ritualDone && !isAnimating {
-            return [0.30, 0.46, 0.62, 0.86][node.layerIndex]
-        }
-        let windows: [(Double, Double)] = [(0.10, 0.18), (0.34, 0.20), (0.58, 0.18), (0.78, 0.16)]
-        let window = windows[node.layerIndex]
-        return CGFloat(max(0, min(1, (progress - window.0) / window.1)))
-    }
-}
-
-// MARK: - Status chip
-
-private struct BackpropStatusChip: View {
-    let title: String
-    let tint: Color
-
-    var body: some View {
-        Text(title)
-            .font(.custom("AvenirNext-DemiBold", size: 11))
-            .foregroundStyle(.white.opacity(0.84))
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
-            .background(tint.opacity(0.14), in: Capsule(style: .continuous))
-            .overlay(Capsule(style: .continuous).stroke(tint.opacity(0.28), lineWidth: 1))
-    }
-}
-
-// MARK: - Layout
-
-private struct BackpropNetworkLayout {
-    let nodes: [BackpropNode]
-    let edges: [BackpropEdge]
-    let anchorPoints: [CGPoint]
-    let centerX: CGFloat
-    let bottomY: CGFloat
-
-    init(size: CGSize, layers: [Int]) {
-        let xPositions: [CGFloat] = [0.13, 0.39, 0.68, 0.90].map { size.width * $0 }
-        let steps: [CGFloat] = [58, 50, 50, 64]
-
-        var builtNodes: [BackpropNode] = []
-        var anchors: [CGPoint] = []
-
-        for (layerIndex, count) in layers.enumerated() {
-            let x = xPositions[layerIndex]
-            anchors.append(CGPoint(x: x, y: 22))
-            for nodeIndex in 0..<count {
-                let y = size.height * 0.45 + (CGFloat(nodeIndex) - CGFloat(count - 1) / 2) * steps[layerIndex]
-                builtNodes.append(BackpropNode(layerIndex: layerIndex, index: nodeIndex, point: CGPoint(x: x, y: y)))
-            }
-        }
-
-        nodes = builtNodes
-        anchorPoints = anchors
-        centerX = size.width / 2
-        bottomY = size.height - 30
-
-        var builtEdges: [BackpropEdge] = []
-        for layerIndex in 0..<(layers.count - 1) {
-            let from = builtNodes.filter { $0.layerIndex == layerIndex }
-            let to = builtNodes.filter { $0.layerIndex == layerIndex + 1 }
-            for source in from {
-                for target in to {
-                    builtEdges.append(BackpropEdge(from: source.point, to: target.point, segment: layerIndex))
-                }
-            }
-        }
-        edges = builtEdges
-    }
-}
-
-private struct BackpropNode: Identifiable {
-    let id = UUID()
-    let layerIndex: Int
-    let index: Int
-    let point: CGPoint
-}
-
-private struct BackpropEdge: Identifiable {
-    let id = UUID()
-    let from: CGPoint
-    let to: CGPoint
-    let segment: Int
 }

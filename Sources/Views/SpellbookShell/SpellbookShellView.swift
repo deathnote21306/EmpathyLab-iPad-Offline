@@ -59,16 +59,6 @@ struct SpellbookShellView: View {
 
             topBar
 
-            VStack {
-                Spacer()
-                SpellNavDotsView(scenes: scenes, activeScene: currentScene) { scene in
-                    go(to: scene)
-                }
-                .padding(.bottom, 20)
-            }
-
-            swiftMark
-
             if let activeModal {
                 SpellModalOverlayView(modal: activeModal) {
                     withAnimation(.easeInOut(duration: 0.3)) {
@@ -80,43 +70,20 @@ struct SpellbookShellView: View {
         }
     }
 
-    private var swiftMark: some View {
-        VStack {
-            Spacer()
-            HStack {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("🍎 APPLE SWIFT")
-                    Text("STUDENT CHALLENGE")
-                    Text("2026")
-                }
-                .font(.custom("AvenirNext-DemiBold", size: 8.5))
-                .tracking(2.2)
-                .foregroundStyle(Color(red: 0.91, green: 0.72, blue: 0.29))
-                .opacity(0.22)
-                .padding(.leading, 16)
-                .padding(.bottom, 70)
-                Spacer()
-            }
-        }
-    }
-
     private var topBar: some View {
         VStack {
-            HStack(spacing: 10) {
+            HStack(spacing: 12) {
                 SpellButton(title: "Home", tone: .gold) {
                     resetAndReturnToStart()
                 }
 
                 Spacer()
 
-                Toggle(isOn: $revealMath) {
-                    Text("Math Reveal")
-                        .font(.custom("AvenirNext-DemiBold", size: 11))
-                        .tracking(1.2)
-                        .foregroundStyle(.white.opacity(0.76))
+                SpellNavDotsView(scenes: scenes, activeScene: currentScene) { scene in
+                    go(to: scene)
                 }
-                .toggleStyle(.switch)
-                .frame(maxWidth: 170)
+
+                Spacer()
 
                 Text("\(currentIndex + 1)/\(scenes.count)")
                     .font(.custom("AvenirNext-DemiBold", size: 11))

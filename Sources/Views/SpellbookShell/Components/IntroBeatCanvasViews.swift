@@ -158,7 +158,6 @@ struct IntroBeat1Canvas: View {
 
     private func drawBeat1(_ ctx: inout GraphicsContext, size: CGSize, t: TimeInterval) {
         let predicted = CGFloat(0.28 + 0.24 * sin(t * 0.50))
-        let truth: CGFloat = 1.0
         let bw: CGFloat = size.width * 0.14
         let bmax: CGFloat = size.height * 0.62
         let by: CGFloat = size.height * 0.14

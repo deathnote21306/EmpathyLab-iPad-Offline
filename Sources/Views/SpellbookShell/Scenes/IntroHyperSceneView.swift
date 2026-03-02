@@ -5,7 +5,6 @@ struct IntroHyperSceneView: View {
 
     var body: some View {
         IntroBeatSceneTemplate(
-            canvas: { IntroBeat3Canvas() },
             chapterNumber: 4,
             chapterTitle: "Training\nthe Trainer",
             missionText: "Adjust 3 real settings — speed, batch size, rounds — and see how each one changes the entire learning outcome.",

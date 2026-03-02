@@ -13,6 +13,10 @@ import SwiftUI
 struct NeuralSpellbookApp: App {
     @StateObject private var appState = AppState()
 
+    init() {
+        AudioManager.shared.start()
+    }
+
     var body: some Scene {
         WindowGroup {
             RootView()
@@ -27,14 +31,6 @@ private struct RootView: View {
     var body: some View {
         Group {
             switch appState.route {
-            case .home:
-                HomeView(
-                    onStartGuided: { appState.startGuidedJourney() },
-                    onStartFreePlay: { appState.enterFreePlay() },
-                    onOpenHelp: { appState.showHelp = true }
-                )
-                .transition(.opacity)
-
             case .guided:
                 SpellbookShellView(onExit: { appState.goHome() })
                 .transition(.opacity)
@@ -51,5 +47,6 @@ private struct RootView: View {
         .sheet(isPresented: $appState.showHelp) {
             HelpAboutView()
         }
+        .task { AudioManager.shared.start() }
     }
 }

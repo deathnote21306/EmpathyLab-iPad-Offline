@@ -5,7 +5,6 @@ struct IntroBackpropSceneView: View {
 
     var body: some View {
         IntroBeatSceneTemplate(
-            canvas: { IntroBeat2Canvas() },
             chapterNumber: 3,
             chapterTitle: "How AI\nActually Learns",
             missionText: "Watch the error trace backward through every layer and nudge each connection closer to the right answer.",

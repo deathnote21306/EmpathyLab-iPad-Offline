@@ -1,187 +1,444 @@
 import SwiftUI
+import CoreMotion
+
+// MARK: - Loss Scene
 
 struct LossSceneView: View {
     let onNext: () -> Void
     let onOpenModal: (SpellModalKey) -> Void
 
     @State private var predictedValue: Double = 0.27
-    private let truthValue: Double = 1.00
+    @State private var showPerfectBadge: Bool = false
+    @State private var showTiltHint: Bool = false
+    @State private var motionManager: CMMotionManager?
 
-    private var loss: Double { pow(truthValue - predictedValue, 2) }
+    private let truth: Double = 1.0
+    private var loss: Double { pow(truth - predictedValue, 2) }
+    private var impactRatio: Double { truth - predictedValue }
 
-    private var meterColor: Color {
-        if loss < 0.06 { return Color(red: 0.24, green: 0.84, blue: 0.75) }
-        if loss < 0.25 { return Color(red: 0.91, green: 0.72, blue: 0.29) }
+    private var stageColor: Color {
+        if loss < 0.02 { return Color(red: 0.24, green: 0.84, blue: 0.75) }
+        if loss < 0.12 { return Color(red: 0.91, green: 0.72, blue: 0.29) }
+        if loss < 0.35 { return Color(red: 1.00, green: 0.42, blue: 0.21) }
         return Color(red: 0.85, green: 0.19, blue: 0.38)
     }
 
-    private var meterMessage: String {
-        if loss < 0.06 { return "Loss is near zero — convergence achieved!" }
-        if loss < 0.25 { return "Getting closer. Drag prediction toward 1.00." }
-        return "High error. Drag prediction right toward truth."
+    private var stageLabel: String {
+        if loss < 0.02 { return "PERFECT HIT" }
+        if loss < 0.12 { return "INNER RING" }
+        if loss < 0.35 { return "MIDDLE RING" }
+        if loss < 0.65 { return "OUTER RING" }
+        return "COMPLETE MISS"
     }
 
-    private var verdict: String {
-        if loss < 0.01 { return "✓ Near-perfect. This is convergence." }
-        if loss < 0.06 { return "✓ Excellent — a trained network looks like this." }
-        if loss < 0.15 { return "△ Improving. Keep moving toward truth." }
-        if loss < 0.35 { return "✕ Significant error. Learning is needed." }
-        return "✕ Catastrophic. Far from truth."
-    }
-
-    private var dynamicFormula: String {
-        let error = truthValue - predictedValue
-        return "Loss = (Truth − Pred)²\n= (\(String(format: "%.2f", truthValue)) − \(String(format: "%.2f", predictedValue)))²\n= (\(String(format: "%.3f", error)))²\n= \(String(format: "%.4f", loss))"
+    private var stageMessage: String {
+        if loss < 0.02 { return "Loss is zero. The spell found its mark." }
+        if loss < 0.12 { return "Loss nearly gone — just a hair to perfect." }
+        if loss < 0.35 { return "Loss coming down — keep going." }
+        if loss < 0.65 { return "Loss is high — tilt right or drag to reduce it." }
+        return "Loss is very high. The prediction missed the mark."
     }
 
     var body: some View {
-        GeometryReader { geo in
-            ZStack {
-                // Animated ambient background reacting to loss
-                LossAmbientBackgroundView(loss: loss)
+        ZStack {
+            LossAmbientBackgroundView(loss: loss)
 
-                VStack(spacing: 0) {
+            VStack(spacing: 0) {
 
-                    // ── HEADER ────────────────────────────────────────────────
-                    HStack(alignment: .firstTextBaseline, spacing: 0) {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("CHAPTER II")
-                                .font(.custom("AvenirNext-DemiBold", size: 9.5))
-                                .tracking(3.5)
-                                .foregroundStyle(Color(red: 0.56, green: 0.43, blue: 0.16))
-                            Text("The Spell Fails — Loss")
-                                .font(.system(size: 22, weight: .bold, design: .serif))
-                                .foregroundStyle(
-                                    LinearGradient(
-                                        colors: [Color(red: 0.91, green: 0.72, blue: 0.29), Color(red: 0.86, green: 0.85, blue: 1.0)],
-                                        startPoint: .leading, endPoint: .trailing
-                                    )
-                                )
-                        }
-                        Spacer()
-                        // Giant live loss number
-                        VStack(alignment: .trailing, spacing: 1) {
-                            Text(String(format: "%.4f", loss))
-                                .font(.system(size: 36, weight: .bold, design: .monospaced))
-                                .foregroundStyle(meterColor)
-                                .animation(.linear(duration: 0.08), value: loss)
-                            Text("LOSS")
-                                .font(.custom("AvenirNext-DemiBold", size: 9))
-                                .tracking(3)
-                                .foregroundStyle(.white.opacity(0.30))
-                        }
-                    }
-                    .padding(.horizontal, 20)
-                    .padding(.top, 8)
-                    .padding(.bottom, 10)
+                // ── HEADER
+                VStack(spacing: 4) {
+                    Text("CHAPTER II")
+                        .font(.custom("AvenirNext-DemiBold", size: 9.5))
+                        .tracking(3.5)
+                        .foregroundStyle(Color(red: 0.56, green: 0.43, blue: 0.16))
+                    Text("The Spell Fails")
+                        .font(.system(size: 24, weight: .bold, design: .serif))
+                        .foregroundStyle(
+                            LinearGradient(
+                                colors: [Color(red: 0.91, green: 0.72, blue: 0.29),
+                                         Color(red: 0.86, green: 0.85, blue: 1.0)],
+                                startPoint: .leading, endPoint: .trailing
+                            )
+                        )
+                    Text("From Chapter I · prediction = 0.27, truth = 1.0")
+                        .font(.system(size: 12, weight: .light, design: .serif))
+                        .italic()
+                        .foregroundStyle(.white.opacity(0.32))
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.top, 10)
+                .padding(.bottom, 10)
 
-                    // ── INSTRUCTION ───────────────────────────────────────────
-                    HStack {
-                        Text("⚠  DRAG THE PREDICTION — FEEL THE LOSS CHANGE")
+                // ── BULLSEYE HERO
+                BullseyeCanvasView(impactRatio: impactRatio, loss: loss)
+                    .frame(width: 226, height: 226)
+
+                // ── STAGE LABEL
+                Text(stageLabel)
+                    .font(.custom("AvenirNext-DemiBold", size: 12))
+                    .tracking(3.5)
+                    .foregroundStyle(stageColor)
+                    .padding(.top, 10)
+                    .animation(.easeInOut(duration: 0.25), value: stageLabel)
+
+                // ── PERFECT BADGE
+                if showPerfectBadge {
+                    HStack(spacing: 6) {
+                        Image(systemName: "sparkles")
+                            .font(.system(size: 11))
+                        Text("CONVERGENCE ACHIEVED")
                             .font(.custom("AvenirNext-DemiBold", size: 11))
-                            .tracking(1.4)
-                            .foregroundStyle(meterColor.opacity(0.88))
-                        Spacer()
-                        Text(verdict)
-                            .font(.custom("AvenirNext-DemiBold", size: 11))
-                            .tracking(0.5)
-                            .foregroundStyle(meterColor.opacity(0.88))
-                            .animation(.easeInOut(duration: 0.3), value: verdict)
+                            .tracking(1.5)
                     }
-                    .padding(.horizontal, 20)
-                    .padding(.bottom, 8)
-
-                    // ── HERO: INTERACTIVE BARS ────────────────────────────────
-                    LossBarsInteractiveView(predictedValue: $predictedValue, truthValue: truthValue)
-                        .padding(.horizontal, 14)
-
-                    // ── STATS ROW ─────────────────────────────────────────────
-                    HStack(spacing: 0) {
-                        lossStatCell(label: "PREDICTED", value: String(format: "%.2f", predictedValue), color: meterColor)
-                        Spacer()
-                        lossStatCell(label: "LOSS", value: String(format: "%.4f", loss), color: meterColor)
-                        Spacer()
-                        lossStatCell(label: "TRUTH", value: "1.00", color: Color(red: 0.24, green: 0.84, blue: 0.75))
-                    }
-                    .padding(.horizontal, 24)
-                    .padding(.vertical, 8)
-                    .animation(.linear(duration: 0.08), value: predictedValue)
-
-                    // ── INSTABILITY METER ─────────────────────────────────────
-                    LossInstabilityMeterView(loss: loss, meterColor: meterColor)
-                        .padding(.horizontal, 14)
-                        .padding(.bottom, 4)
-
-                    Text(meterMessage)
-                        .font(.custom("AvenirNext-Regular", size: 13))
-                        .foregroundStyle(.white.opacity(0.55))
-                        .padding(.horizontal, 24)
-                        .padding(.bottom, 8)
-
-                    // ── LOSS LANDSCAPE ────────────────────────────────────────
-                    LossLandscapeCanvasView(
-                        predictedValue: predictedValue,
-                        truthValue: truthValue,
-                        loss: loss
+                    .foregroundStyle(Color(red: 0.24, green: 0.84, blue: 0.75))
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 6)
+                    .background(
+                        Color(red: 0.24, green: 0.84, blue: 0.75).opacity(0.10),
+                        in: Capsule()
                     )
-                    .padding(.horizontal, 14)
-                    .frame(height: max(90, geo.size.height * 0.16))
-                    .padding(.bottom, 10)
+                    .overlay(
+                        Capsule()
+                            .stroke(Color(red: 0.24, green: 0.84, blue: 0.75).opacity(0.35), lineWidth: 1)
+                    )
+                    .padding(.top, 6)
+                    .transition(.scale(scale: 0.85).combined(with: .opacity))
+                }
 
-                    Spacer(minLength: 0)
+                // ── MESSAGE
+                Text(stageMessage)
+                    .font(.system(size: 15, weight: .light, design: .serif))
+                    .foregroundStyle(.white.opacity(0.58))
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 36)
+                    .padding(.top, 6)
+                    .animation(.easeInOut(duration: 0.25), value: stageMessage)
 
-                    // ── BOTTOM ROW: FORMULA + CONTROLS ───────────────────────
-                    HStack(alignment: .top, spacing: 12) {
-                        // Live formula block
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("⟳ LIVE FORMULA")
-                                .font(.custom("AvenirNext-DemiBold", size: 9))
-                                .tracking(1.6)
-                                .foregroundStyle(Color(red: 0.63, green: 0.50, blue: 1.0).opacity(0.80))
-                            Text(dynamicFormula)
-                                .font(.system(size: 13, weight: .medium, design: .monospaced))
-                                .foregroundStyle(Color(red: 0.63, green: 0.50, blue: 1.0))
-                                .lineSpacing(3)
-                                .animation(.linear(duration: 0.08), value: predictedValue)
-                        }
-                        .padding(12)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(
-                            Color(red: 0.49, green: 0.38, blue: 1.0).opacity(0.07),
-                            in: RoundedRectangle(cornerRadius: 10, style: .continuous)
-                        )
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                .stroke(Color(red: 0.49, green: 0.38, blue: 1.0).opacity(0.22), lineWidth: 1)
-                        )
+                Spacer(minLength: 12)
 
-                        // Action buttons
-                        VStack(spacing: 8) {
-                            SpellButton(title: "✦ Deep Dive", tone: .gold) {
-                                onOpenModal(.loss)
-                            }
-                            SpellButton(title: "Perform the Ritual →", tone: .spirit, isPulsing: true) {
-                                onNext()
-                            }
-                        }
+                // ── LOSS READOUT
+                VStack(spacing: 2) {
+                    Text(String(format: "%.0f%%", min(100, loss * 100)))
+                        .font(.system(size: 44, weight: .bold, design: .monospaced))
+                        .foregroundStyle(stageColor)
+                        .contentTransition(.numericText())
+                        .animation(.linear(duration: 0.04), value: loss)
+                    Text("LOSS")
+                        .font(.custom("AvenirNext-DemiBold", size: 9))
+                        .tracking(2.5)
+                        .foregroundStyle(.white.opacity(0.25))
+                }
+
+                Spacer(minLength: 14)
+
+                // ── INTERACTION INSTRUCTIONS
+                HStack(spacing: 16) {
+                    HStack(spacing: 5) {
+                        Image(systemName: "hand.draw")
+                            .font(.system(size: 11))
+                        Text("DRAG RIGHT")
+                            .font(.custom("AvenirNext-DemiBold", size: 9.5))
+                            .tracking(2)
                     }
-                    .padding(.horizontal, 14)
-                    .padding(.bottom, 90)
+                    .foregroundStyle(.white.opacity(0.25))
+
+                    Text("·")
+                        .foregroundStyle(.white.opacity(0.15))
+
+                    HStack(spacing: 5) {
+                        Image(systemName: "gyroscope")
+                            .font(.system(size: 11))
+                        Text("TILT RIGHT")
+                            .font(.custom("AvenirNext-DemiBold", size: 9.5))
+                            .tracking(2)
+                    }
+                    .foregroundStyle(.white.opacity(0.25))
+                }
+                .padding(.bottom, 8)
+
+                // ── DRAG RAIL
+                LossDragRailView(value: $predictedValue, thumbColor: stageColor)
+                    .padding(.horizontal, 26)
+
+                Spacer(minLength: 18)
+
+                // ── ACTIONS
+                HStack(spacing: 10) {
+                    SpellButton(title: "✦ Deep Dive", tone: .gold) {
+                        onOpenModal(.loss)
+                    }
+                    SpellButton(title: "Continue →", tone: .spirit, isPulsing: loss < 0.02) {
+                        onNext()
+                    }
+                }
+                .padding(.horizontal, 20)
+                .padding(.bottom, 90)
+            }
+
+            // ── TILT HINT BANNER
+            if showTiltHint {
+                VStack {
+                    Spacer()
+                    InteractionHintBanner(
+                        icon: "gyroscope",
+                        text: "Tilt your device to the right to reduce the loss — align your prediction with the truth"
+                    )
+                    .padding(.horizontal, 18)
+                    .padding(.bottom, 170)
+                }
+                .transition(.opacity.combined(with: .offset(y: 6)))
+                .allowsHitTesting(false)
+            }
+        }
+        .onAppear { startMotion() }
+        .onDisappear { stopMotion() }
+        .onChange(of: loss) { _, newLoss in
+            if newLoss < 0.02 {
+                withAnimation(.spring(response: 0.50, dampingFraction: 0.65)) {
+                    showPerfectBadge = true
+                }
+            } else if showPerfectBadge {
+                withAnimation(.easeOut(duration: 0.25)) {
+                    showPerfectBadge = false
                 }
             }
         }
     }
 
-    @ViewBuilder
-    private func lossStatCell(label: String, value: String, color: Color) -> some View {
-        VStack(spacing: 2) {
-            Text(value)
-                .font(.system(size: 20, weight: .bold, design: .monospaced))
-                .foregroundStyle(color)
-            Text(label)
-                .font(.custom("AvenirNext-DemiBold", size: 9))
-                .tracking(2)
-                .foregroundStyle(.white.opacity(0.35))
+    // MARK: - Motion
+
+    private func startMotion() {
+        let m = CMMotionManager()
+        guard m.isDeviceMotionAvailable else { return }
+        motionManager = m
+        m.deviceMotionUpdateInterval = 1.0 / 30.0
+        m.startDeviceMotionUpdates(to: .main) { data, _ in
+            guard let data else { return }
+
+            // Map "right side of screen goes down" to the correct gravity axis
+            // based on the current interface orientation.
+            // Portrait:          device X → screen right  → gravity.x > 0
+            // LandscapeLeft:     device Y → screen right  → gravity.y > 0
+            // LandscapeRight:    device -Y → screen right → gravity.y < 0
+            // PortraitUpsideDown: device -X → screen right → gravity.x < 0
+            let orientation = UIApplication.shared.connectedScenes
+                .compactMap { $0 as? UIWindowScene }
+                .first?.interfaceOrientation ?? .portrait
+
+            let rightDown: Double
+            switch orientation {
+            case .landscapeLeft:      rightDown =  data.gravity.y
+            case .landscapeRight:     rightDown = -data.gravity.y
+            case .portraitUpsideDown: rightDown = -data.gravity.x
+            default:                  rightDown =  data.gravity.x
+            }
+
+            if rightDown > 0.12 {
+                let strength = min((rightDown - 0.12) * 2.5, 1.0)
+                predictedValue = min(0.99, predictedValue + strength * 0.012)
+            }
+        }
+        // Show hint for 5 seconds
+        withAnimation(.easeIn(duration: 0.35)) { showTiltHint = true }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 5.5) {
+            withAnimation(.easeOut(duration: 0.40)) { showTiltHint = false }
+        }
+    }
+
+    private func stopMotion() {
+        motionManager?.stopDeviceMotionUpdates()
+        motionManager = nil
+    }
+}
+
+// MARK: - Bullseye Canvas
+
+private struct BullseyeCanvasView: View {
+    let impactRatio: Double
+    let loss: Double
+
+    var body: some View {
+        TimelineView(.animation(minimumInterval: 1.0 / 20.0)) { tl in
+            let t = tl.date.timeIntervalSinceReferenceDate
+            Canvas { ctx, size in
+                draw(&ctx, size: size, t: t)
+            }
+        }
+        .allowsHitTesting(false)
+    }
+
+    private func ringColor(for index: Int) -> Color {
+        switch index {
+        case 4: return Color(red: 0.24, green: 0.84, blue: 0.75)
+        case 3: return Color(red: 0.55, green: 0.88, blue: 0.62)
+        case 2: return Color(red: 0.91, green: 0.72, blue: 0.29)
+        case 1: return Color(red: 1.00, green: 0.42, blue: 0.21)
+        default: return Color(red: 0.85, green: 0.19, blue: 0.38)
+        }
+    }
+
+    private func activeRingIndex() -> Int {
+        if loss < 0.02 { return 4 }
+        if loss < 0.12 { return 3 }
+        if loss < 0.35 { return 2 }
+        if loss < 0.65 { return 1 }
+        return 0
+    }
+
+    private func draw(_ ctx: inout GraphicsContext, size: CGSize, t: TimeInterval) {
+        let cx   = size.width  / 2
+        let cy   = size.height / 2
+        let ctr  = CGPoint(x: cx, y: cy)
+        let maxR = min(cx, cy) * 0.88
+
+        let radii: [CGFloat] = [maxR, maxR * 0.76, maxR * 0.54, maxR * 0.33, maxR * 0.13]
+        let activeIdx = activeRingIndex()
+        let isPerfect = loss < 0.02
+        let pulse     = CGFloat(0.80 + 0.20 * sin(t * (isPerfect ? 4.0 : 2.2)))
+
+        let glowCol = isPerfect ? Color(red: 0.24, green: 0.84, blue: 0.75) : ringColor(for: activeIdx)
+        ctx.fill(
+            Path(ellipseIn: CGRect(x: cx - maxR * 1.30, y: cy - maxR * 1.30,
+                                   width: maxR * 2.60, height: maxR * 2.60)),
+            with: .radialGradient(
+                Gradient(colors: [glowCol.opacity(0.12 * pulse), .clear]),
+                center: ctr, startRadius: maxR * 0.20, endRadius: maxR * 1.30
+            )
+        )
+
+        for i in 0..<5 {
+            let r        = radii[i]
+            let isActive = isPerfect || (i == activeIdx)
+            let col      = isPerfect ? Color(red: 0.24, green: 0.84, blue: 0.75) : ringColor(for: i)
+            let strokeA: CGFloat = isActive ? (isPerfect ? 0.88 * pulse : 0.90) : 0.20
+            let fillA:   CGFloat = isActive ? (isPerfect ? 0.13 * pulse : 0.09) : 0.03
+            let strokeW: CGFloat = isActive ? 2.2 : 0.9
+            let rect     = CGRect(x: cx - r, y: cy - r, width: r * 2, height: r * 2)
+            ctx.fill(Path(ellipseIn: rect), with: .color(col.opacity(fillA)))
+            ctx.stroke(Path(ellipseIn: rect),
+                       with: .color(col.opacity(strokeA)),
+                       style: StrokeStyle(lineWidth: strokeW))
+        }
+
+        var hLine = Path(); hLine.move(to: CGPoint(x: cx - maxR, y: cy)); hLine.addLine(to: CGPoint(x: cx + maxR, y: cy))
+        var vLine = Path(); vLine.move(to: CGPoint(x: cx, y: cy - maxR)); vLine.addLine(to: CGPoint(x: cx, y: cy + maxR))
+        ctx.stroke(hLine, with: .color(.white.opacity(0.06)), lineWidth: 0.5)
+        ctx.stroke(vLine, with: .color(.white.opacity(0.06)), lineWidth: 0.5)
+
+        for angleDeg in [45.0, 135.0, 225.0, 315.0] {
+            let rad = angleDeg * .pi / 180
+            var tick = Path()
+            tick.move(to: CGPoint(x: cx + (maxR - 7) * CGFloat(cos(rad)),
+                                  y: cy + (maxR - 7) * CGFloat(sin(rad))))
+            tick.addLine(to: CGPoint(x: cx + maxR * CGFloat(cos(rad)),
+                                     y: cy + maxR * CGFloat(sin(rad))))
+            ctx.stroke(tick, with: .color(.white.opacity(0.12)), lineWidth: 1.0)
+        }
+
+        let impactR  = CGFloat(max(0, impactRatio)) * maxR
+        let impactX  = cx
+        let impactY  = cy - impactR
+        let impactPt = CGPoint(x: impactX, y: impactY)
+        let dotColor = isPerfect ? Color(red: 0.24, green: 0.84, blue: 0.75) : ringColor(for: activeIdx)
+
+        if !isPerfect && impactR > 5 {
+            var line = Path()
+            line.move(to: ctr); line.addLine(to: impactPt)
+            ctx.stroke(line, with: .color(dotColor.opacity(0.22)),
+                       style: StrokeStyle(lineWidth: 1.0, dash: [3, 4]))
+        }
+
+        ctx.fill(
+            Path(ellipseIn: CGRect(x: impactX - 22, y: impactY - 22, width: 44, height: 44)),
+            with: .radialGradient(
+                Gradient(colors: [dotColor.opacity(0.55 * pulse), .clear]),
+                center: impactPt, startRadius: 0, endRadius: 22
+            )
+        )
+
+        let dotR: CGFloat = 7.0
+        ctx.fill(Path(ellipseIn: CGRect(x: impactX - dotR, y: impactY - dotR,
+                                        width: dotR * 2, height: dotR * 2)),
+                 with: .color(dotColor))
+        ctx.stroke(Path(ellipseIn: CGRect(x: impactX - dotR, y: impactY - dotR,
+                                          width: dotR * 2, height: dotR * 2)),
+                   with: .color(.white.opacity(0.90)), lineWidth: 2.0)
+
+        if isPerfect {
+            for i in 0..<8 {
+                let angle = Double(i) * .pi / 4 + t * 0.5
+                var spoke = Path()
+                spoke.move(to: CGPoint(x: cx + 5  * CGFloat(cos(angle)),
+                                       y: cy + 5  * CGFloat(sin(angle))))
+                spoke.addLine(to: CGPoint(x: cx + 22 * CGFloat(cos(angle)),
+                                          y: cy + 22 * CGFloat(sin(angle))))
+                ctx.stroke(spoke,
+                           with: .color(Color(red: 0.24, green: 0.84, blue: 0.75).opacity(0.72 * pulse)),
+                           lineWidth: 2.0)
+            }
+        }
+    }
+}
+
+// MARK: - Drag Rail
+
+private struct LossDragRailView: View {
+    @Binding var value: Double
+    let thumbColor: Color
+
+    var body: some View {
+        VStack(spacing: 8) {
+            GeometryReader { proxy in
+                let w = proxy.size.width
+                ZStack(alignment: .leading) {
+                    Capsule()
+                        .fill(
+                            LinearGradient(
+                                colors: [
+                                    Color(red: 0.85, green: 0.19, blue: 0.38).opacity(0.80),
+                                    Color(red: 1.00, green: 0.42, blue: 0.21).opacity(0.80),
+                                    Color(red: 0.91, green: 0.72, blue: 0.29).opacity(0.80),
+                                    Color(red: 0.24, green: 0.84, blue: 0.75).opacity(0.80),
+                                ],
+                                startPoint: .leading, endPoint: .trailing
+                            )
+                        )
+                        .frame(height: 6)
+
+                    let thumbX = max(0, min(w - 28, CGFloat(value) * w - 14))
+                    Circle()
+                        .fill(thumbColor)
+                        .frame(width: 28, height: 28)
+                        .shadow(color: thumbColor.opacity(0.65), radius: 10)
+                        .overlay(Circle().stroke(.white.opacity(0.88), lineWidth: 2.0))
+                        .offset(x: thumbX, y: 0)
+                }
+                .frame(height: 28)
+                .contentShape(Rectangle())
+                .gesture(
+                    DragGesture(minimumDistance: 0)
+                        .onChanged { val in
+                            value = max(0.01, min(0.99, Double(val.location.x / w)))
+                        }
+                )
+            }
+            .frame(height: 28)
+
+            HStack {
+                HStack(spacing: 3) {
+                    Image(systemName: "xmark.circle.fill").font(.system(size: 10))
+                    Text("OFF TARGET").font(.custom("AvenirNext-DemiBold", size: 9)).tracking(1.0)
+                }
+                .foregroundStyle(Color(red: 0.85, green: 0.19, blue: 0.38).opacity(0.60))
+
+                Spacer()
+
+                HStack(spacing: 3) {
+                    Text("PERFECT AIM").font(.custom("AvenirNext-DemiBold", size: 9)).tracking(1.0)
+                    Image(systemName: "checkmark.circle.fill").font(.system(size: 10))
+                }
+                .foregroundStyle(Color(red: 0.24, green: 0.84, blue: 0.75).opacity(0.60))
+            }
         }
     }
 }
@@ -204,13 +461,12 @@ private struct LossAmbientBackgroundView: View {
 
     private func drawAmbient(_ ctx: inout GraphicsContext, size: CGSize, t: TimeInterval, loss: Double) {
         let pulse = CGFloat(0.80 + 0.20 * sin(t * 0.65))
-        let lossColor: Color = loss < 0.06
+        let lossColor: Color = loss < 0.02
             ? Color(red: 0.24, green: 0.84, blue: 0.75)
-            : loss < 0.25
+            : loss < 0.12
             ? Color(red: 0.91, green: 0.72, blue: 0.29)
             : Color(red: 0.85, green: 0.19, blue: 0.38)
 
-        // Primary loss-reactive orb (bottom left)
         ctx.fill(
             Path(ellipseIn: CGRect(x: -size.width * 0.15, y: size.height * 0.38,
                                    width: size.width * 0.70, height: size.height * 0.70)),
@@ -220,8 +476,6 @@ private struct LossAmbientBackgroundView: View {
                 startRadius: 0, endRadius: size.width * 0.48
             )
         )
-
-        // Secondary mana accent (top right)
         ctx.fill(
             Path(ellipseIn: CGRect(x: size.width * 0.50, y: -size.height * 0.10,
                                    width: size.width * 0.60, height: size.height * 0.45)),
@@ -230,361 +484,6 @@ private struct LossAmbientBackgroundView: View {
                 center: CGPoint(x: size.width * 0.88, y: 0),
                 startRadius: 0, endRadius: size.width * 0.36
             )
-        )
-
-        // Subtle horizontal scan line at loss level
-        let scanY = size.height * 0.30 + CGFloat(loss) * size.height * 0.20
-        var scanLine = Path()
-        scanLine.move(to: CGPoint(x: 0, y: scanY))
-        scanLine.addLine(to: CGPoint(x: size.width, y: scanY))
-        ctx.stroke(scanLine, with: .color(lossColor.opacity(0.04 * pulse)), lineWidth: 1)
-    }
-}
-
-// MARK: - Instability meter (extracted)
-
-private struct LossInstabilityMeterView: View {
-    let loss: Double
-    let meterColor: Color
-
-    var body: some View {
-        VStack(spacing: 6) {
-            HStack {
-                Text("INSTABILITY")
-                    .font(.custom("AvenirNext-DemiBold", size: 9))
-                    .tracking(2.5)
-                    .foregroundStyle(Color(red: 0.91, green: 0.72, blue: 0.29).opacity(0.65))
-                Spacer()
-                Text("Perfect ← → Worst")
-                    .font(.custom("AvenirNext-DemiBold", size: 9))
-                    .tracking(1)
-                    .foregroundStyle(.white.opacity(0.28))
-            }
-
-            GeometryReader { proxy in
-                ZStack(alignment: .leading) {
-                    Capsule(style: .continuous)
-                        .fill(.white.opacity(0.06))
-                    Capsule(style: .continuous)
-                        .fill(
-                            LinearGradient(
-                                colors: loss < 0.06
-                                    ? [Color(red: 0.24, green: 0.84, blue: 0.75), Color(red: 0.24, green: 0.84, blue: 0.75)]
-                                    : loss < 0.25
-                                    ? [Color(red: 0.91, green: 0.72, blue: 0.29), Color(red: 1.0, green: 0.42, blue: 0.21)]
-                                    : [Color(red: 1.0, green: 0.42, blue: 0.21), Color(red: 0.85, green: 0.19, blue: 0.38)],
-                                startPoint: .leading, endPoint: .trailing
-                            )
-                        )
-                        .frame(width: max(0, min(1, loss)) * proxy.size.width)
-                        .shadow(color: meterColor.opacity(0.40), radius: 6, x: 0, y: 0)
-                }
-            }
-            .frame(height: 8)
-            .animation(.linear(duration: 0.10), value: loss)
-        }
-    }
-}
-
-// MARK: - Horizontal bars interactive canvas
-
-private struct LossBarsInteractiveView: View {
-    @Binding var predictedValue: Double
-    let truthValue: Double
-
-    private let padL: CGFloat = 96
-    private let padR: CGFloat = 52
-    private let barH: CGFloat = 38
-    private let spacing: CGFloat = 32
-
-    var body: some View {
-        GeometryReader { proxy in
-            let size = proxy.size
-            let barW = max(1, size.width - padL - padR)
-            ZStack {
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(Color(red: 0.014, green: 0.010, blue: 0.048).opacity(0.92))
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .stroke(Color.white.opacity(0.05), lineWidth: 1)
-                Canvas { context, _ in
-                    drawBars(context: &context, size: size)
-                }
-            }
-            .contentShape(Rectangle())
-            .gesture(
-                DragGesture(minimumDistance: 0)
-                    .onChanged { value in
-                        let localX = value.location.x - padL
-                        predictedValue = max(0.01, min(0.99, Double(localX / barW)))
-                    }
-            )
-        }
-        .frame(height: 220)
-    }
-
-    private func drawBars(context: inout GraphicsContext, size: CGSize) {
-        let barW = size.width - padL - padR
-        let totalH = 2 * barH + spacing
-        let ty = (size.height - totalH) / 2 - 8
-        let py = ty + barH + spacing
-
-        let loss = pow(1.0 - predictedValue, 2)
-        let col: Color = loss < 0.05 ? Color(red: 0.24, green: 0.84, blue: 0.75)
-                       : loss < 0.20 ? Color(red: 0.91, green: 0.72, blue: 0.29)
-                       : Color(red: 0.85, green: 0.19, blue: 0.38)
-        let tc = Color(red: 0.24, green: 0.84, blue: 0.75)
-
-        // — TRUTH bar (full) —
-        let trect = CGRect(x: padL, y: ty, width: barW, height: barH)
-        context.fill(Path(roundedRect: trect, cornerRadius: 7), with: .color(tc.opacity(0.07)))
-        context.fill(
-            Path(roundedRect: trect, cornerRadius: 7),
-            with: .linearGradient(
-                Gradient(colors: [tc.opacity(0.94), tc.opacity(0.50)]),
-                startPoint: CGPoint(x: padL, y: 0),
-                endPoint: CGPoint(x: padL + barW, y: 0)
-            )
-        )
-        context.stroke(Path(roundedRect: trect, cornerRadius: 7),
-                       with: .color(tc.opacity(0.40)), lineWidth: 1.5)
-        // Sheen on truth bar
-        context.fill(
-            Path(roundedRect: CGRect(x: padL + 4, y: ty + 3, width: barW - 8, height: barH * 0.28), cornerRadius: 3),
-            with: .color(.white.opacity(0.08))
-        )
-
-        context.draw(
-            Text("TRUTH").font(.custom("AvenirNext-DemiBold", size: 10)).foregroundStyle(tc.opacity(0.70)),
-            at: CGPoint(x: padL / 2, y: ty + barH / 2), anchor: .center
-        )
-        context.draw(
-            Text("1.00").font(.custom("AvenirNext-DemiBold", size: 14)).foregroundStyle(tc.opacity(0.92)),
-            at: CGPoint(x: padL + barW + padR / 2, y: ty + barH / 2), anchor: .center
-        )
-
-        // — PREDICTED bar (variable) —
-        let predW = max(10, CGFloat(predictedValue) * barW)
-        let ptrack = CGRect(x: padL, y: py, width: barW, height: barH)
-        let pfill  = CGRect(x: padL, y: py, width: predW, height: barH)
-        context.fill(Path(roundedRect: ptrack, cornerRadius: 7), with: .color(col.opacity(0.07)))
-        context.fill(
-            Path(roundedRect: pfill, cornerRadius: 7),
-            with: .linearGradient(
-                Gradient(colors: [col.opacity(0.94), col.opacity(0.52)]),
-                startPoint: CGPoint(x: padL, y: 0),
-                endPoint: CGPoint(x: padL + predW, y: 0)
-            )
-        )
-        context.stroke(Path(roundedRect: ptrack, cornerRadius: 7),
-                       with: .color(col.opacity(0.28)), lineWidth: 1.5)
-        // Sheen on predicted bar
-        if predW > 12 {
-            context.fill(
-                Path(roundedRect: CGRect(x: padL + 4, y: py + 3, width: predW - 8, height: barH * 0.28), cornerRadius: 3),
-                with: .color(.white.opacity(0.08))
-            )
-        }
-
-        context.draw(
-            Text("PREDICTED").font(.custom("AvenirNext-DemiBold", size: 10)).foregroundStyle(col.opacity(0.70)),
-            at: CGPoint(x: padL / 2, y: py + barH / 2), anchor: .center
-        )
-        context.draw(
-            Text(String(format: "%.2f", predictedValue)).font(.custom("AvenirNext-DemiBold", size: 14)).foregroundStyle(col.opacity(0.92)),
-            at: CGPoint(x: padL + barW + padR / 2, y: py + barH / 2), anchor: .center
-        )
-
-        // Drag handle
-        let hx = padL + predW
-        let hy = py + barH / 2
-        context.fill(
-            Path(ellipseIn: CGRect(x: hx - 16, y: hy - 16, width: 32, height: 32)),
-            with: .radialGradient(
-                Gradient(colors: [col.opacity(0.50), .clear]),
-                center: CGPoint(x: hx, y: hy), startRadius: 0, endRadius: 16
-            )
-        )
-        context.fill(Path(ellipseIn: CGRect(x: hx - 6, y: hy - 6, width: 12, height: 12)),
-                     with: .color(col))
-        context.stroke(Path(ellipseIn: CGRect(x: hx - 6, y: hy - 6, width: 12, height: 12)),
-                       with: .color(.white.opacity(0.88)), lineWidth: 1.8)
-
-        // Error gap visualization
-        if loss > 0.003 {
-            let errorX = padL + predW
-            let errorEndX = padL + barW
-            if errorEndX > errorX + 8 {
-                let errW = errorEndX - errorX
-                context.fill(
-                    Path(roundedRect: CGRect(x: errorX, y: ty + 1, width: errW, height: barH - 2), cornerRadius: 4),
-                    with: .color(col.opacity(0.14))
-                )
-                context.stroke(
-                    Path(roundedRect: CGRect(x: errorX + 1, y: ty + 2, width: errW - 2, height: barH - 4), cornerRadius: 3),
-                    with: .color(col.opacity(0.55)),
-                    style: StrokeStyle(lineWidth: 1.2, dash: [4, 3])
-                )
-                let midErrX = errorX + errW / 2
-                var conn = Path()
-                conn.move(to: CGPoint(x: midErrX, y: ty + barH))
-                conn.addLine(to: CGPoint(x: midErrX, y: py))
-                context.stroke(conn, with: .color(col.opacity(0.32)),
-                               style: StrokeStyle(lineWidth: 1.2, dash: [3, 3]))
-                context.draw(
-                    Text(String(format: "Δ %.3f", loss))
-                        .font(.custom("AvenirNext-DemiBold", size: 10))
-                        .foregroundStyle(col.opacity(0.90)),
-                    at: CGPoint(x: midErrX, y: ty + barH + spacing / 2), anchor: .center
-                )
-            }
-        } else {
-            context.draw(
-                Text("✓ Perfect").font(.custom("AvenirNext-DemiBold", size: 11)).foregroundStyle(tc.opacity(0.92)),
-                at: CGPoint(x: padL + barW * 0.75, y: ty + barH + spacing / 2), anchor: .center
-            )
-        }
-
-        context.draw(
-            Text("← drag anywhere to adjust prediction →")
-                .font(.custom("AvenirNext-Regular", size: 8))
-                .foregroundStyle(.white.opacity(0.16)),
-            at: CGPoint(x: padL + barW / 2, y: size.height - 6), anchor: .center
-        )
-    }
-}
-
-// MARK: - Loss landscape
-
-private struct LossLandscapeCanvasView: View {
-    let predictedValue: Double
-    let truthValue: Double
-    let loss: Double
-
-    var body: some View {
-        GeometryReader { proxy in
-            let size = proxy.size
-            ZStack {
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(Color(red: 0.014, green: 0.010, blue: 0.048).opacity(0.88))
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .stroke(Color.white.opacity(0.05), lineWidth: 1)
-                Canvas { context, _ in
-                    drawLandscape(context: &context, size: size)
-                }
-            }
-        }
-    }
-
-    private func drawLandscape(context: inout GraphicsContext, size: CGSize) {
-        let pad: (l: CGFloat, r: CGFloat, t: CGFloat, b: CGFloat) = (24, 12, 12, 22)
-        let width  = max(40, size.width - pad.l - pad.r)
-        let height = max(20, size.height - pad.t - pad.b)
-
-        // Axis labels
-        context.draw(Text("loss").font(.custom("AvenirNext-DemiBold", size: 8)).foregroundStyle(.white.opacity(0.22)),
-                     at: CGPoint(x: pad.l - 3, y: pad.t + 8), anchor: .trailing)
-        context.draw(Text("prediction →").font(.custom("AvenirNext-DemiBold", size: 8)).foregroundStyle(.white.opacity(0.18)),
-                     at: CGPoint(x: pad.l + width / 2, y: size.height - 3))
-
-        // Axis lines
-        var axis = Path()
-        axis.move(to: CGPoint(x: pad.l, y: pad.t))
-        axis.addLine(to: CGPoint(x: pad.l, y: pad.t + height))
-        axis.addLine(to: CGPoint(x: pad.l + width, y: pad.t + height))
-        context.stroke(axis, with: .color(.white.opacity(0.08)), lineWidth: 1)
-
-        // Build curve points
-        var pts: [CGPoint] = []
-        for step in 0...100 {
-            let t = Double(step) / 100
-            let x = pad.l + width * CGFloat(t)
-            let sampleLoss = pow(truthValue - t, 2)
-            let y = pad.t + height - height * CGFloat(sampleLoss) * 0.92
-            pts.append(CGPoint(x: x, y: y))
-        }
-
-        // Area fill under curve
-        var area = Path()
-        area.move(to: CGPoint(x: pad.l, y: pad.t + height))
-        for pt in pts { area.addLine(to: pt) }
-        area.addLine(to: CGPoint(x: pad.l + width, y: pad.t + height))
-        area.closeSubpath()
-        context.fill(area, with: .linearGradient(
-            Gradient(colors: [
-                Color(red: 0.85, green: 0.19, blue: 0.38).opacity(0.14),
-                Color(red: 0.91, green: 0.72, blue: 0.29).opacity(0.08),
-                Color(red: 0.24, green: 0.84, blue: 0.75).opacity(0.12)
-            ]),
-            startPoint: CGPoint(x: pad.l, y: 0),
-            endPoint: CGPoint(x: pad.l + width, y: 0)
-        ))
-
-        // Curve stroke
-        var curve = Path()
-        curve.move(to: pts[0])
-        for pt in pts.dropFirst() { curve.addLine(to: pt) }
-        context.stroke(
-            curve,
-            with: .linearGradient(
-                Gradient(colors: [
-                    Color(red: 0.85, green: 0.19, blue: 0.38).opacity(0.85),
-                    Color(red: 0.91, green: 0.72, blue: 0.29).opacity(0.75),
-                    Color(red: 0.24, green: 0.84, blue: 0.75).opacity(0.92)
-                ]),
-                startPoint: CGPoint(x: pad.l, y: 0),
-                endPoint: CGPoint(x: pad.l + width, y: 0)
-            ),
-            lineWidth: 2.5
-        )
-
-        // User's position dot
-        let dotX = pad.l + width * CGFloat(predictedValue)
-        let dotY = pad.t + height - height * CGFloat(loss) * 0.92
-        let dotPoint = CGPoint(x: dotX, y: dotY)
-        let dotColor = loss < 0.05 ? Color(red: 0.24, green: 0.84, blue: 0.75)
-                     : loss < 0.20 ? Color(red: 0.91, green: 0.72, blue: 0.29)
-                     : Color(red: 0.85, green: 0.19, blue: 0.38)
-
-        // Drop line
-        var drop = Path()
-        drop.move(to: dotPoint)
-        drop.addLine(to: CGPoint(x: dotX, y: pad.t + height))
-        context.stroke(drop, with: .color(dotColor.opacity(0.22)),
-                       style: StrokeStyle(lineWidth: 1, dash: [2, 2]))
-
-        // Dot glow
-        context.fill(
-            Path(ellipseIn: CGRect(x: dotX - 18, y: dotY - 18, width: 36, height: 36)),
-            with: .radialGradient(
-                Gradient(colors: [dotColor.opacity(0.70), .clear]),
-                center: dotPoint, startRadius: 0, endRadius: 18
-            )
-        )
-        // Dot core
-        context.fill(
-            Path(ellipseIn: CGRect(x: dotX - 5, y: dotY - 5, width: 10, height: 10)),
-            with: .color(dotColor)
-        )
-        context.stroke(
-            Path(ellipseIn: CGRect(x: dotX - 5, y: dotY - 5, width: 10, height: 10)),
-            with: .color(.white.opacity(0.80)), lineWidth: 1.5
-        )
-
-        // Loss annotation next to dot
-        if loss > 0.02 {
-            context.draw(
-                Text(String(format: "%.3f", loss))
-                    .font(.custom("AvenirNext-DemiBold", size: 9))
-                    .foregroundStyle(dotColor.opacity(0.85)),
-                at: CGPoint(x: dotX + 14, y: dotY - 4)
-            )
-        }
-
-        // Global minimum marker
-        let minX = pad.l + width * CGFloat(truthValue)
-        context.draw(
-            Text("min").font(.custom("AvenirNext-DemiBold", size: 8)).foregroundStyle(Color(red: 0.24, green: 0.84, blue: 0.75).opacity(0.50)),
-            at: CGPoint(x: minX, y: pad.t + height - 4), anchor: .center
         )
     }
 }
